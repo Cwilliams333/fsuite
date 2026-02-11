@@ -1,3 +1,13 @@
+fsuite (1.6.2-1) unstable; urgency=medium
+
+  * fix(fcontent): add missing exit 0 in pretty output mode (PR #5, Cwilliams333)
+  * feat(fcontent): dedupe repeated file paths in output — show full path on
+    first occurrence, basename-only for subsequent same-file matches
+  * Uses declare -A associative array for robust non-contiguous dedup
+  * Regex fix: [^:]+ instead of greedy .+ for reliable path:line:content parsing
+
+ -- Chess Williams <chess.w.williams@gmail.com>  Tue, 11 Feb 2026 01:00:00 -0600
+
 fsuite (1.6.1-1) unstable; urgency=medium
 
   * Hardening patch: LC_ALL=C locale pinning for consistent grep behavior
