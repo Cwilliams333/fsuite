@@ -5,8 +5,11 @@ fsuite (1.6.2-1) unstable; urgency=medium
     first occurrence, basename-only for subsequent same-file matches
   * Uses declare -A associative array for robust non-contiguous dedup
   * Regex fix: [^:]+ instead of greedy .+ for reliable path:line:content parsing
+  * fsearch: add production-grade path filtering via repeatable --include/-I and --exclude/-x
+  * fsearch: add support for wildcard matching when filter pattern contains *, ?, or [] and order-preserving filtering
+  * fsearch: include include/exclude patterns in telemetry flags field
 
- -- Chess Williams <chess.w.williams@gmail.com>  Tue, 11 Feb 2026 01:00:00 -0600
+ -- Chess Williams <chess.w.williams@gmail.com>  Tue, 17 Feb 2026 12:00:00 -0600
 
 fsuite (1.6.1-1) unstable; urgency=medium
 
