@@ -839,6 +839,23 @@ sudo ln -s "$(pwd)/fmap" /usr/local/bin/fmap
 
 ## Changelog
 
+### v1.7.0
+
+Unified version bump. All tools now at 1.7.0. Seven bug fixes, new features, 281 tests.
+
+**Bug fixes:**
+- **ftree**: recon path identity at depth > 1 — positional `rel_path` replaces `basename`, JSON includes both `name` and `path` fields
+- **ftree**: timeout detection fixed — structured output protocol (`value|flag`) replaces broken subshell variable propagation
+- **ftree**: `total_size_bytes` preserves `-1` sentinel for unknown sizes (was coerced to `0`)
+- **telemetry**: `run_id`-based dedup replaces timestamp-based `UNIQUE` constraint — burst runs no longer silently dropped
+- **telemetry**: atomic DB migration with `.bail on` + `BEGIN IMMEDIATE` + rollback safety
+- **fsearch**: bounded memory — `head -n` before `mapfile` + `|| true` guards under `pipefail`
+- **fcontent**: `-q` exit code 1 on no match (matches documented contract)
+
+**New features:**
+- `fsearch`: `-I/--include` and `-x/--exclude` repeatable path filters with wildcard matching
+- `fcontent`: path deduplication in output — first match shows full path, subsequent show basename
+
 ### v1.6.2
 
 Production-grade path filtering for `fsearch`:

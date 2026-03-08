@@ -1,3 +1,21 @@
+fsuite (1.7.0-1) unstable; urgency=medium
+
+  * Unified version bump: all tools now 1.7.0
+  * fix(ftree): recon path identity at depth > 1 — positional rel_path, JSON path field
+  * fix(ftree): timeout detection via structured output protocol (subshell var fix)
+  * fix(ftree): total_size_bytes preserves -1 sentinel for unknown sizes
+  * fix(telemetry): run_id-based dedup replaces timestamp-based UNIQUE constraint
+  * fix(telemetry): atomic DB migration with .bail on + BEGIN IMMEDIATE
+  * fix(telemetry): legacy JSONL import backfills run_id
+  * fix(fsearch): bounded memory — head -n before mapfile + || true guards
+  * fix(fcontent): -q exit code 1 on no match (matches README contract)
+  * fix(fmetrics-predict): version aligned to suite
+  * fsearch: add include/exclude filtering (-I/-x) with wildcard matching (PR #6)
+  * fcontent: path deduplication in output (PR #5)
+  * New tests: 281 total across 6 suites, migration atomicity test
+
+ -- Chess Williams <chess.w.williams@gmail.com>  Sat, 08 Mar 2026 00:40:00 -0600
+
 fsuite (1.6.2-1) unstable; urgency=medium
 
   * fix(fcontent): add missing exit 0 in pretty output mode (PR #5, Cwilliams333)
