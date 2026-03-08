@@ -2,16 +2,18 @@
 
 ## Overview
 
-This test suite provides comprehensive coverage for all fsuite tools with 259 total test cases across 6 suites.
+This test suite provides comprehensive coverage for all fsuite tools across 7 suites.
 
 ## Files Created
 
 ```
-test_fsearch.sh       - 37 tests for fsearch tool
-test_fcontent.sh      - 47 tests for fcontent tool
-test_fmap.sh          - 58 tests for fmap tool
-test_ftree.sh         - 54 tests for ftree tool
-test_integration.sh   - 33 tests for tool pipelines
+test_fsearch.sh       - fsearch coverage
+test_fcontent.sh      - fcontent coverage
+test_fmap.sh          - fmap coverage
+test_fread.sh         - fread coverage
+test_ftree.sh         - ftree coverage
+test_integration.sh   - pipeline coverage
+test_telemetry.sh     - telemetry coverage
 run_all_tests.sh      - Master test runner
 TESTING.md            - Complete testing documentation
 ```
@@ -41,6 +43,12 @@ bash test_ftree.sh
 
 # Test pipelines
 bash test_integration.sh
+
+# Test fread
+bash test_fread.sh
+
+# Test telemetry
+bash test_telemetry.sh
 ```
 
 ## Prerequisites
@@ -58,20 +66,20 @@ Without optional dependencies, relevant tests will be automatically skipped.
 
 ## What Gets Tested
 
-### fsearch (37 tests)
+### fsearch
 ✓ Pattern matching (globs, extensions, wildcards)
 ✓ Output formats (pretty, paths, JSON)
 ✓ Backend selection (find, fd, auto)
 ✓ Path handling and error cases
 
-### fcontent (47 tests)
+### fcontent
 ✓ Directory and stdin modes
 ✓ Output formats and JSON structure
 ✓ Query handling (case, multi-word, special chars)
 ✓ rg-args pass-through
 ✓ Limits and edge cases
 
-### fmap (58 tests)
+### fmap
 ✓ Language extraction (all 12: Python, JS, TS, Rust, Go, Java, C, C++, Ruby, Lua, PHP, Bash)
 ✓ Per-language exact parsing (type validation, symbol counts, zero-duplication)
 ✓ Dedup regression (JS arrow functions, cross-language)
@@ -80,19 +88,31 @@ Without optional dependencies, relevant tests will be automatically skipped.
 ✓ Filters, caps, and precedence rules
 ✓ Default ignore, shebang detection, pipeline
 
-### ftree (54 tests)
+### fread
+✓ Bounded file reads, ranges, head/tail, and context windows
+✓ JSON/pretty/paths output
+✓ Pipeline modes (stdin paths, unified diff)
+✓ Budget caps, truncation hints, telemetry
+
+### ftree
 ✓ Tree mode with smart defaults
 ✓ Recon mode (sizes and counts)
 ✓ Snapshot mode (recon + tree)
 ✓ Depth, truncation, ignore patterns
 ✓ All output formats
 
-### Integration (33 tests)
+### Integration
 ✓ fsearch → fcontent pipelines
 ✓ Multi-stage pipelines
 ✓ Real-world workflows (security, code quality, log analysis)
 ✓ Complete agent workflows
 ✓ Error handling
+
+### Telemetry
+✓ Tiered telemetry (0/1/2/3)
+✓ Hardware and machine profile capture
+✓ Migration and rollback validation
+✓ Project-name and flag accumulation behavior
 
 ## Test Output
 
@@ -158,13 +178,14 @@ bash run_all_tests.sh && echo "Ready to deploy" || echo "Tests failed"
 
 | Tool | Test Cases | Coverage |
 |------|-----------|----------|
-| fsearch | 37 | Pattern matching, backends, output formats, error handling |
-| fcontent | 47 | Search modes, queries, rg-args, limits, edge cases |
-| fmap | 58 | Language extraction (12 langs), exact parsing, dedup regression, modes, filters, caps, pipeline |
-| ftree | 54 | Tree/recon/snapshot modes, ignore patterns, validation |
-| Integration | 33 | Pipelines, workflows, real-world use cases |
-| Telemetry | 30 | Tiered telemetry, hardware detection, machine profile |
-| **Total** | **259** | **Comprehensive end-to-end coverage** |
+| fsearch | comprehensive | Pattern matching, backends, output formats, error handling |
+| fcontent | comprehensive | Search modes, queries, rg-args, limits, edge cases |
+| fmap | comprehensive | Language extraction, exact parsing, dedup regression, modes, filters, caps, pipeline |
+| fread | comprehensive | File reads, stdin modes, truncation budgets, JSON output, telemetry |
+| ftree | comprehensive | Tree/recon/snapshot modes, ignore patterns, validation |
+| Integration | comprehensive | Pipelines, workflows, real-world use cases |
+| Telemetry | comprehensive | Tiered telemetry, hardware detection, machine profile, migration |
+| **Total** | **7 suites** | **Comprehensive end-to-end coverage** |
 
 ## Next Steps
 
@@ -183,19 +204,23 @@ bash run_all_tests.sh
 bash test_fsearch.sh
 bash test_fcontent.sh
 bash test_fmap.sh
+bash test_fread.sh
 bash test_ftree.sh
+bash test_telemetry.sh
 bash test_integration.sh
 
 # Check tool versions
 ./fsearch --version
 ./fcontent --version
 ./fmap --version
+./fread --version
 ./ftree --version
 
 # Check dependencies
 ./fsearch --self-check
 ./fcontent --self-check
 ./fmap --self-check
+./fread --self-check
 ./ftree --self-check
 ```
 
@@ -212,5 +237,6 @@ Run the help command for any tool:
 ./fsearch --help
 ./fcontent --help
 ./fmap --help
+./fread --help
 ./ftree --help
 ```

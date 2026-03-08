@@ -10,9 +10,9 @@
 
 ---
 
-**A four-tool filesystem reconnaissance kit for humans and AI agents.**
+**A six-tool filesystem reconnaissance and analytics kit for humans and AI agents.**
 
-`fsuite` provides four composable CLI utilities that turn filesystem exploration into a clean, scriptable, agent-friendly pipeline:
+`fsuite` provides six composable CLI tools that turn filesystem exploration into a clean, scriptable, agent-friendly pipeline:
 
 | Tool | Purpose |
 |------|---------|
@@ -20,8 +20,10 @@
 | **`fcontent`** | Search _inside_ files for text (powered by ripgrep) |
 | **`ftree`** | Visualize directory structure with smart defaults and recon mode |
 | **`fmap`** | Extract structural skeleton from code (code cartography) |
+| **`fread`** | Read files with budgets, ranges, context windows, and diff-aware input |
+| **`fmetrics`** | Analyze telemetry, history, and predicted runtime |
 
-Each tool does one thing. They work independently or together for a complete **scout-then-map** workflow with zero glue code.
+The first five are reconnaissance drones. `fmetrics` is the flight recorder and analyst. Together they cover **scout -> map -> read -> measure** with zero glue code.
 
 ## Contents
 
@@ -32,6 +34,9 @@ Each tool does one thing. They work independently or together for a complete **s
   - [fsearch](#fsearch--filename--path-search)
   - [fcontent](#fcontent--file-content-search)
   - [ftree](#ftree--directory-structure-visualization)
+  - [fmap](#fmap--code-cartography)
+  - [fread](#fread--budgeted-file-reading)
+  - [fmetrics](#fmetrics--telemetry-analytics)
 - [Output Formats](#output-formats)
 - [Agent / Headless Usage](#agent--headless-usage)
 - [Cheat Sheet](#cheat-sheet)
@@ -73,8 +78,8 @@ BEFORE fsuite:
   Spawn Explore agent -> 10-15 internal tool calls -> still blind on structure
 
 AFTER fsuite:
-  ftree --snapshot -o json  ->  fsearch -o paths  ->  fcontent -o json
-  3-4 calls. Full understanding. ~70% fewer tool invocations.
+  ftree --snapshot -o json  ->  fsearch -o paths  ->  fmap -o json  ->  fread -o json
+  4-5 calls. Structural context plus bounded file reads. Still dramatically fewer tool invocations.
 ```
 
 The full unedited analysis is in **[AGENT-ANALYSIS.md](AGENT-ANALYSIS.md)** — the raw self-assessment, exactly as Claude Code wrote it after studying and testing every tool in this repo.
@@ -89,7 +94,7 @@ That document is the pitch. Not because we wrote it, but because the agent did.
 # Clone and make executable
 git clone https://github.com/lliWcWill/fsuite.git
 cd fsuite
-chmod +x fsearch fcontent ftree fmap
+chmod +x fsearch fcontent ftree fmap fread fmetrics
 
 # Find all .log files under /var/log
 ./fsearch '*.log' /var/log
@@ -102,6 +107,9 @@ chmod +x fsearch fcontent ftree fmap
 
 # Show the directory tree (depth 3, smart defaults)
 ./ftree /project
+
+# Read targeted context around a function or match
+./fread /project/src/auth.py --around "def authenticate" -A 20
 
 # Combine: find logs, then grep inside them
 ./fsearch --output paths '*.log' /var/log | ./fcontent "ERROR"
@@ -324,11 +332,81 @@ fmap -L bash /project/scripts/deploy
 fmap -m 100 /project
 ```
 
+### `fread` &mdash; budgeted file reading
+
+Reads **just enough file content** for the next step in an investigation. It fills the gap after `fsearch`/`fmap`: once you know which file matters, `fread` lets you read a range, read around a line or literal pattern, cap by lines/bytes/tokens, or feed it paths/diffs from stdin.
+
+```bash
+fread [OPTIONS] <file>
+```
+
+**Key features:**
+
+- Range reads (`-r 120:220`), head/tail, and context windows around a line or literal pattern
+- Budget controls: `--max-lines`, `--max-bytes`, `--token-budget`
+- Stdin modes:
+  - `--stdin-format=paths` for `fsearch -> fread`
+  - `--stdin-format=unified-diff` for `git diff -> fread`
+- Binary detection with `--force-text` escape hatch
+- `next_hint` output on truncation so agents can continue exactly where they stopped
+- Three output formats: `pretty` (default), `paths`, `json`
+
+**Examples:**
+
+```bash
+# Read a bounded file excerpt
+fread /project/src/auth.py --head 80
+
+# Read a precise range
+fread /project/src/auth.py -r 120:220
+
+# Read around a literal pattern
+fread /project/src/auth.py --around "def authenticate" -B 5 -A 20
+
+# Read around a changed hunk from git diff
+git diff | fread --from-stdin --stdin-format=unified-diff -B 3 -A 10
+
+# Pipe file paths from fsearch and cap how many get read
+fsearch -o paths '*.py' /project | fread --from-stdin --stdin-format=paths --max-files 5 -o json
+```
+
+### `fmetrics` &mdash; telemetry analytics
+
+Closes the loop after reconnaissance. `fmetrics` ingests local telemetry, shows dashboards and history, and predicts how long scans will take on a target before you launch them.
+
+```bash
+fmetrics <subcommand> [options]
+```
+
+**Key features:**
+
+- `import` moves JSONL telemetry into SQLite
+- `stats` shows usage, runtime, and reliability summaries
+- `history` filters by tool and project
+- `predict` estimates runtime from historical data
+- `profile` exposes the Tier 3 machine profile
+
+**Examples:**
+
+```bash
+# Import telemetry for analysis
+fmetrics import
+
+# See runtime and reliability dashboard
+fmetrics stats
+
+# Review recent ftree runs
+fmetrics history --tool ftree --limit 10
+
+# Estimate scan time before a large recon
+fmetrics predict /project
+```
+
 ---
 
 ## Output Formats
 
-All three tools support three output modes via `--output` / `-o`:
+The five reconnaissance tools (`fsearch`, `fcontent`, `ftree`, `fmap`, `fread`) support three output modes via `--output` / `-o`:
 
 | Mode | Description | Best for |
 |------|-------------|----------|
@@ -341,7 +419,7 @@ All three tools support three output modes via `--output` / `-o`:
 ```json
 {
   "tool": "fsearch",
-  "version": "1.0.0",
+  "version": "1.8.0",
   "pattern": "*token*",
   "name_glob": "*token*",
   "path": "/home/user",
@@ -357,7 +435,7 @@ All three tools support three output modes via `--output` / `-o`:
 ```json
 {
   "tool": "fcontent",
-  "version": "1.0.0",
+  "version": "1.8.0",
   "query": "ERROR",
   "mode": "directory",
   "path": "/var/log",
@@ -373,7 +451,7 @@ All three tools support three output modes via `--output` / `-o`:
 ```json
 {
   "tool": "ftree",
-  "version": "1.2.0",
+  "version": "1.8.0",
   "mode": "tree",
   "backend": "tree",
   "path": "/project",
@@ -394,7 +472,7 @@ All three tools support three output modes via `--output` / `-o`:
 ```json
 {
   "tool": "ftree",
-  "version": "1.2.0",
+  "version": "1.8.0",
   "mode": "recon",
   "backend": "find/du/stat",
   "path": "/project",
@@ -559,6 +637,39 @@ Copy-paste ready. Every command runs headless (no prompts, no TTY needed) unless
 | `fmap -q /project` | Quiet mode — no header |
 | `fsearch -o paths '*.py' /project \| fmap -o json` | Pipeline: find then map |
 
+### `fread` — Read Just Enough Context
+
+| Command | What it does |
+|---------|-------------|
+| `fread /project/src/auth.py` | Read a file with default caps |
+| `fread /project/src/auth.py -r 120:220` | Read a precise inclusive line range |
+| `fread /project/src/auth.py --head 50` | Read the first 50 lines |
+| `fread /project/src/auth.py --tail 40` | Read the last 40 lines |
+| `fread /project/src/auth.py --around-line 150 -B 5 -A 15` | Read context around line 150 |
+| `fread /project/src/auth.py --around "def authenticate" -B 5 -A 20` | Read around the first literal pattern match |
+| `fread /project/src/auth.py --all-matches --around "TODO"` | Read around every match until caps are hit |
+| `fread /project/src/auth.py --max-lines 80 --max-bytes 12000` | Enforce hard output budgets |
+| `fread /project/src/auth.py --token-budget 2000 -o json` | Cap by estimated token cost |
+| `fsearch -o paths '*.py' /project \| fread --from-stdin --stdin-format=paths --max-files 5` | Read the first 5 files from a pipeline |
+| `git diff \| fread --from-stdin --stdin-format=unified-diff -B 3 -A 10` | Read context around changed hunks |
+| `fread --self-check` | Verify dependencies (`sed`, `awk`, `grep`, `wc`, `od`, `perl`) |
+| `fread --version` | Print version |
+
+### `fmetrics` — Analyze and Predict
+
+| Command | What it does |
+|---------|-------------|
+| `fmetrics import` | Import `telemetry.jsonl` into SQLite |
+| `fmetrics stats` | Show aggregate runtime and reliability dashboard |
+| `fmetrics stats -o json` | Machine-readable stats for automation |
+| `fmetrics history --tool ftree --limit 10` | Show recent runs for one tool |
+| `fmetrics history --project MyApp` | Filter telemetry by project name |
+| `fmetrics predict /project` | Estimate runtimes for the target path |
+| `fmetrics predict --tool ftree /project` | Estimate a single tool only |
+| `fmetrics profile` | Show Tier 3 machine profile |
+| `fmetrics clean --days 30` | Prune old telemetry |
+| `fmetrics --self-check` | Verify sqlite3, python3, and predict helper availability |
+
 ### Pipeline — Find Then Grep (the power move)
 
 | Command | What it does |
@@ -572,6 +683,7 @@ Copy-paste ready. Every command runs headless (no prompts, no TTY needed) unless
 | `fsearch -o paths '*.py' /app \| fcontent --output json "def "` | JSON list of every function definition across all Python files |
 | `fsearch -o paths '*.log' /var/log \| fcontent --output paths "CRITICAL"` | Just file paths of logs containing `CRITICAL` |
 | `fsearch -o paths '*.conf' /etc \| fcontent --output json "listen"` | JSON: which config files have `listen` directives? |
+| `fsearch -o paths '*.py' /project \| fread --from-stdin --stdin-format=paths --max-files 5 -o json` | Read bounded context from the first few matching files |
 
 ### Headless / Agent Workflows
 
@@ -586,8 +698,12 @@ These are designed for AI agents, CI pipelines, cron jobs, and automation script
 | **Inventory a project** | `fsearch -o json '*.py' /project` | Agent gets structured file list with count |
 | **Map code structure** | `fmap -o json /project` | Agent gets functions, classes, imports per file |
 | **Map specific files** | `fsearch -o paths '*.py' /project \| fmap -o json` | Pipeline: find then map structure |
+| **Read targeted context** | `fread -o json /project/src/auth.py --around "def authenticate" -A 20` | Agent reads one function neighborhood without flooding context |
+| **Read changed code** | `git diff \| fread --from-stdin --stdin-format=unified-diff -o json` | Agent turns a patch into contextual file reads |
+| **Budgeted follow-up reads** | `fsearch -o paths '*.py' /project \| fread --from-stdin --stdin-format=paths --max-files 5 --token-budget 2000 -o json` | Agent keeps reading within a controlled context budget |
 | **Functions only** | `fmap -t function -o json /project` | Agent gets only function definitions |
 | **Find + grep in one shot** | `fsearch -o paths '*.py' /project \| fcontent -o json "import"` | Agent gets structured match data in one pipeline |
+| **Predict before scanning** | `fmetrics predict /project` | Agent estimates cost before launching recon on a large target |
 | **Count log files** | `fsearch -o json '*.log' /var/log \| jq .total_found` | Pull a single integer from JSON |
 | **List matched files only** | `fsearch -o paths '*.cfg' /etc \| fcontent -o paths "deprecated"` | Clean file list, no noise, one per line |
 | **Feed files to another tool** | `fsearch -o paths '*.py' /src \| xargs wc -l` | Line count of every Python file found |
@@ -696,6 +812,33 @@ These are designed for AI agents, CI pipelines, cron jobs, and automation script
 
 > **Tip:** Numeric flags support combined syntax: `-m50` is equivalent to `-m 50`.
 
+**`fread`**
+
+| Flag | Short | Values | Default |
+|------|-------|--------|---------|
+| `--output` | `-o` | `pretty`, `paths`, `json` | `pretty` |
+| `--lines` | `-r` | `START:END` | — |
+| `--head` | — | any integer | — |
+| `--tail` | — | any integer | — |
+| `--around-line` | — | any integer | — |
+| `--around` | — | literal pattern | — |
+| `--all-matches` | — | — | off |
+| `--before` | `-B` | any integer | `5` |
+| `--after` | `-A` | any integer | `10` |
+| `--max-lines` | — | any integer | `200` |
+| `--max-bytes` | — | any integer | `50000` |
+| `--token-budget` | — | any integer | off |
+| `--max-files` | — | any integer | `10` |
+| `--from-stdin` | — | — | off |
+| `--stdin-format` | — | `paths`, `unified-diff` | required with `--from-stdin` |
+| `--force-text` | — | — | off |
+| `--quiet` | `-q` | — | off |
+| `--project-name` | — | any string | auto-detected |
+| `--self-check` | — | — | — |
+| `--install-hints` | — | — | — |
+
+> **Tip:** `fread` truncation reports a `next_hint` so agents can continue from the last emitted line without recalculating offsets.
+
 **`fmetrics`**
 
 | Subcommand | Key Flags | Description |
@@ -722,6 +865,8 @@ These are designed for AI agents, CI pipelines, cron jobs, and automation script
 | `tree` | **Required** by `ftree` (tree mode) | `sudo apt install tree` |
 | `fd` / `fdfind` | Faster filename search backend | `sudo apt install fd-find` |
 | `rg` (ripgrep) | **Required** by `fcontent` | `sudo apt install ripgrep` |
+| `perl` | **Required** by `fread` for JSON escaping and portable timing fallback | `sudo apt install perl` |
+| `sqlite3` | Required by `fmetrics import/stats/history/clean` | `sudo apt install sqlite3` |
 
 All tools include built-in guidance:
 
@@ -734,6 +879,10 @@ ftree --self-check         # Verify tree + gitignore support
 ftree --install-hints      # Print install command for tree
 fmap --self-check          # Verify grep is available
 fmap --install-hints       # Print install command for grep
+fread --self-check         # Verify sed/awk/grep/wc/od/perl
+fread --install-hints      # Print install commands for core deps
+fmetrics --self-check      # Verify sqlite3 + python3 helper chain
+fmetrics --install-hints
 ```
 
 ---
@@ -826,18 +975,34 @@ fmetrics clean --days 30
 ```bash
 git clone https://github.com/lliWcWill/fsuite.git
 cd fsuite
-chmod +x fsearch fcontent ftree fmap
+chmod +x fsearch fcontent ftree fmap fread fmetrics
 
 # Optional: symlink into your PATH
 sudo ln -s "$(pwd)/fsearch" /usr/local/bin/fsearch
 sudo ln -s "$(pwd)/fcontent" /usr/local/bin/fcontent
 sudo ln -s "$(pwd)/ftree" /usr/local/bin/ftree
 sudo ln -s "$(pwd)/fmap" /usr/local/bin/fmap
+sudo ln -s "$(pwd)/fread" /usr/local/bin/fread
+sudo ln -s "$(pwd)/fmetrics" /usr/local/bin/fmetrics
 ```
 
 ---
 
 ## Changelog
+
+### v1.8.0
+
+The missing read step is now part of the suite. `fread` turns `fsuite` from scout-and-map into scout-map-read-measure, and the entire release is unified at `1.8.0`.
+
+**New tool:**
+- **`fread`**: budgeted file reading with range, head/tail, around-line, around-pattern, stdin path mode, and unified-diff mode
+- **`fread`**: token estimation, binary detection, truncation `next_hint`, and structured JSON output for agents
+
+**Release hardening:**
+- **Packaging**: Debian package now installs `fread`
+- **Telemetry**: `fread` uses portable millisecond timestamp fallback for macOS/BSD as well as GNU/Linux
+- **Tests**: dedicated `fread` suite added and wired into the master runner; full suite now runs across 7 test suites
+- **Docs**: README promoted from a four-tool view to the full six-tool suite
 
 ### v1.7.0
 
