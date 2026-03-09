@@ -105,12 +105,11 @@ discover_local_deb() {
   fi
 
   LOCAL_DEB="$(
-    find "$REPO_PARENT" -maxdepth 1 -type f -name 'fsuite_*_all.deb' -printf '%f\n' 2>/dev/null \
+    find "$REPO_PARENT" -maxdepth 1 -type f -name 'fsuite_*_all.deb' 2>/dev/null \
       | sort -V \
       | tail -n1
   )"
   [[ -n "$LOCAL_DEB" ]] || die "No local fsuite .deb found under ${REPO_PARENT}"
-  LOCAL_DEB="${REPO_PARENT}/${LOCAL_DEB}"
 }
 
 discover_local_deb
@@ -206,14 +205,15 @@ qemu-system-x86_64 \
   -pidfile "$PID_FILE"
 
 wait_for_ssh() {
-  timeout 300 bash -c '
-    while true; do
-      if ssh -i "$0" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -p "$1" "$2@127.0.0.1" "echo ready" >/dev/null 2>&1; then
-        exit 0
-      fi
-      sleep 2
-    done
-  ' "$PRIVATE_KEY" "$SSH_PORT" "$SSH_USER"
+  local deadline=$((SECONDS + 300))
+  while (( SECONDS < deadline )); do
+    if ssh -i "$PRIVATE_KEY" -p "$SSH_PORT" "${SSH_OPTS[@]}" \
+      "${SSH_USER}@127.0.0.1" "echo ready" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
 }
 
 wait_for_ssh
