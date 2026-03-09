@@ -584,7 +584,7 @@ The six operational tools (`fsearch`, `fcontent`, `ftree`, `fmap`, `fread`, `fed
 ```json
 {
   "tool": "fsearch",
-  "version": "1.9.0",
+  "version": "2.0.0",
   "pattern": "*token*",
   "name_glob": "*token*",
   "path": "/home/user",
@@ -600,7 +600,7 @@ The six operational tools (`fsearch`, `fcontent`, `ftree`, `fmap`, `fread`, `fed
 ```json
 {
   "tool": "fcontent",
-  "version": "1.9.0",
+  "version": "2.0.0",
   "query": "ERROR",
   "mode": "directory",
   "path": "/var/log",
@@ -616,7 +616,7 @@ The six operational tools (`fsearch`, `fcontent`, `ftree`, `fmap`, `fread`, `fed
 ```json
 {
   "tool": "ftree",
-  "version": "1.9.0",
+  "version": "2.0.0",
   "mode": "tree",
   "backend": "tree",
   "path": "/project",
@@ -637,7 +637,7 @@ The six operational tools (`fsearch`, `fcontent`, `ftree`, `fmap`, `fread`, `fed
 ```json
 {
   "tool": "ftree",
-  "version": "1.9.0",
+  "version": "2.0.0",
   "mode": "recon",
   "backend": "find/du/stat",
   "path": "/project",
@@ -658,7 +658,7 @@ The six operational tools (`fsearch`, `fcontent`, `ftree`, `fmap`, `fread`, `fed
 ```json
 {
   "tool": "fmap",
-  "version": "1.9.0",
+  "version": "2.0.0",
   "mode": "single_file",
   "path": "/project/src/auth.py",
   "total_files_scanned": 1,
@@ -686,7 +686,7 @@ The six operational tools (`fsearch`, `fcontent`, `ftree`, `fmap`, `fread`, `fed
 ```json
 {
   "tool": "fread",
-  "version": "1.9.0",
+  "version": "2.0.0",
   "mode": "around",
   "truncated": false,
   "truncation_reason": "none",
@@ -728,7 +728,7 @@ The six operational tools (`fsearch`, `fcontent`, `ftree`, `fmap`, `fread`, `fed
 ```json
 {
   "tool": "fmetrics",
-  "version": "1.9.0",
+  "version": "2.0.0",
   "subcommand": "stats",
   "total_runs": 24,
   "db_path": "/home/user/.fsuite/telemetry.db",
@@ -926,6 +926,10 @@ Copy-paste ready. Every command runs headless (no prompts, no TTY needed) unless
 | `fedit /project/src/auth.py --after 'def authenticate(user):' --content-file patch.txt` | Preview an insertion after an anchor |
 | `fedit /project/src/auth.py --before 'return True' --stdin --apply` | Insert payload from stdin before an anchor |
 | `fedit /project/src/auth.py --symbol authenticate --replace 'return False' --with 'return deny()'` | Scope the patch to one `fmap`-resolved symbol |
+| `fedit /project/src/auth.py --function authenticate --replace 'return False' --with 'return deny()'` | Scope to a function without spelling `--symbol-type` |
+| `fedit /project/src/auth.py --class AuthHandler --after 'self.ready = False' --with $'\n        self.ready = True'` | Target one class block with shortcut syntax |
+| `printf '/project/a.py\n/project/b.py\n' \| fedit --targets-file - --targets-format paths --replace 'x = 1' --with 'x = 2'` | Preview a preflighted batch patch from stdin targets |
+| `fedit --targets-file map.json --targets-format fmap-json --function authenticate --replace 'return False' --with 'return deny()' --apply` | Apply one symbol-scoped edit across `fmap` JSON targets |
 | `fedit /project/src/auth.py --expect 'def authenticate' --replace 'old' --with 'new'` | Require expected text before patching |
 | `fedit /project/src/auth.py --expect-sha256 HASH --replace 'old' --with 'new' --apply` | Guard the write with a content hash |
 | `fedit --create /project/src/new_file.py --content-file body.txt --apply` | Create a new file from payload |
@@ -979,6 +983,9 @@ These are designed for AI agents, CI pipelines, cron jobs, and automation script
 | **Read targeted context** | `fread -o json /project/src/auth.py --around "def authenticate" -A 20` | Agent reads one function neighborhood without flooding context |
 | **Preview a patch** | `fedit -o json /project/src/auth.py --symbol authenticate --replace "return False" --with "return deny()"` | Agent gets a structured diff before changing code |
 | **Apply a patch** | `fedit -o json /project/src/auth.py --symbol authenticate --replace "return False" --with "return deny()" --apply` | Agent mutates only after it has inspected the diff |
+| **Shortcut-scoped patch** | `fedit -o json /project/src/auth.py --function authenticate --replace "return False" --with "return deny()"` | Agent targets one function directly from the CLI |
+| **Batch patch preview** | `printf 'a.py\nb.py\n' \| fedit -o json --targets-file - --targets-format paths --replace "x = 1" --with "x = 2"` | Agent previews a multi-file batch before writing |
+| **Batch symbol patch** | `fedit -o json --targets-file map.json --targets-format fmap-json --function authenticate --replace "return False" --with "return deny()" --apply` | Agent applies one symbol-scoped patch across mapped files |
 | **Read changed code** | `git diff \| fread --from-stdin --stdin-format=unified-diff -o json` | Agent turns a patch into contextual file reads |
 | **Budgeted follow-up reads** | `fsearch -o paths '*.py' /project \| fread --from-stdin --stdin-format=paths --max-files 5 --token-budget 2000 -o json` | Agent keeps reading within a controlled context budget |
 | **Functions only** | `fmap -t function -o json /project` | Agent gets only function definitions |
@@ -1107,7 +1114,15 @@ These are designed for AI agents, CI pipelines, cron jobs, and automation script
 | `--expect-sha256` | — | SHA-256 hex digest | — |
 | `--symbol` | — | symbol name | — |
 | `--symbol-type` | — | `function`, `class`, `import`, `type`, `export`, `constant` | any |
+| `--function` | — | function name | — |
+| `--class` | — | class name | — |
+| `--method` | — | method/function name | — |
+| `--import` | — | import text | — |
+| `--constant` | — | constant name | — |
+| `--type` | — | type name | — |
 | `--fmap-json` | — | path to prior `fmap -o json` output | auto-run `fmap` |
+| `--targets-file` | — | path list file or `-` for stdin | — |
+| `--targets-format` | — | `paths`, `fmap-json` | — |
 | `--allow-multiple` | — | — | off |
 | `--apply` | — | — | off |
 | `--dry-run` | — | — | on |
@@ -1319,7 +1334,7 @@ ls -lh ../fsuite_*_all.deb
 ### Install the Debian package locally
 
 ```bash
-sudo dpkg -i ../fsuite_1.9.0-1_all.deb
+sudo dpkg -i ../fsuite_*_all.deb
 ftree --version
 fread --version
 fedit --version
@@ -1333,6 +1348,20 @@ For harnesses that read repo instructions, point them at [AGENTS.md](AGENTS.md).
 ---
 
 ## Changelog
+
+### v2.0.0
+
+`fedit` grows from a single-file patch tool into a symbol-first, preflighted batch editor. This release adds the structural editing surface that turns the suite into scout-map-read-edit at project scale.
+
+**New editing surface:**
+- **`fedit`**: symbol shortcuts `--function`, `--class`, `--method`, `--import`, `--constant`, and `--type`
+- **`fedit`**: preflighted batch patching via `--targets-file` with `paths` or `fmap-json` target formats
+- **`fedit`**: batch JSON envelope for headless agents, including per-target status and combined diffs
+
+**Workflow hardening:**
+- **`fsearch` / `fcontent`**: default-ignore steering for dependency/build trees so agent discovery stays focused on real project files
+- **Docs**: README and AGENTS guidance now frame `fcontent` as a confirmation tool and `fedit` as part of the structural edit loop
+- **Packaging**: suite version unified at `2.0.0`, including helper scripts and Debian release assets
 
 ### v1.9.0
 

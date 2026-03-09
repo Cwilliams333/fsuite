@@ -154,6 +154,7 @@ SYMBOL_NAME=""
 SYMBOL_TYPE=""
 SHORTCUT_SYMBOL=""
 SHORTCUT_TYPE=""
+SHORTCUT_FLAG=""
 FMAP_JSON_PATH=""
 ERROR_CODE=""
 ERROR_DETAIL=""
@@ -178,8 +179,6 @@ BATCH_ANCHORS=()
 BATCH_PRECONDITIONS=()
 BATCH_CANDIDATES=()
 BATCH_EXPECTED_SHAS=()
-BATCH_SYMBOLS=()
-BATCH_SYMBOL_TYPES=()
 BATCH_LOCK_FDS=()
 
 cleanup() {
@@ -210,7 +209,11 @@ die() {
   [[ -n "$ERROR_CODE" ]] || ERROR_CODE="invalid_args"
   ERROR_DETAIL="$*"
   if [[ "$OUTPUT" == "json" ]]; then
-    render_json
+    if (( BATCH_MODE == 1 )); then
+      render_batch_json
+    else
+      render_json
+    fi
   fi
   echo "fedit: $*" >&2
   exit "$code"
@@ -1265,9 +1268,9 @@ render_batch_json() {
   local i
 
   for (( i=0; i<total; i++ )); do
-    [[ -z "${BATCH_ERROR_CODES[i]}" ]] && targets_ready=$((targets_ready + 1))
-    [[ "${BATCH_APPLIED[i]}" == "true" ]] && targets_applied=$((targets_applied + 1))
-    [[ -n "${BATCH_DIFFS[i]}" ]] && combined_diff+="${BATCH_DIFFS[i]}"$'\n'
+    [[ -z "${BATCH_ERROR_CODES[i]:-}" ]] && targets_ready=$((targets_ready + 1))
+    [[ "${BATCH_APPLIED[i]:-false}" == "true" ]] && targets_applied=$((targets_applied + 1))
+    [[ -n "${BATCH_DIFFS[i]:-}" ]] && combined_diff+="${BATCH_DIFFS[i]}"$'\n'
   done
 
   local batch_applied=false
@@ -1302,20 +1305,20 @@ render_batch_json() {
       printf '"symbol":null,'
       printf '"symbol_type":null,'
     fi
-    printf '"applied":%s,' "${BATCH_APPLIED[i]}"
-    printf '"anchors_matched":%s,' "${BATCH_ANCHORS[i]}"
-    if [[ "${BATCH_PRECONDITIONS[i]}" == "true" ]]; then
+    printf '"applied":%s,' "${BATCH_APPLIED[i]:-false}"
+    printf '"anchors_matched":%s,' "${BATCH_ANCHORS[i]:-0}"
+    if [[ "${BATCH_PRECONDITIONS[i]:-true}" == "true" ]]; then
       printf '"preconditions_ok":true,'
     else
       printf '"preconditions_ok":false,'
     fi
-    printf '"diff":"%s",' "$(json_escape_str "${BATCH_DIFFS[i]}")"
-    if [[ -n "${BATCH_ERROR_CODES[i]}" ]]; then
+    printf '"diff":"%s",' "$(json_escape_str "${BATCH_DIFFS[i]:-}")"
+    if [[ -n "${BATCH_ERROR_CODES[i]:-}" ]]; then
       printf '"error_code":"%s",' "$(json_escape_str "${BATCH_ERROR_CODES[i]}")"
     else
       printf '"error_code":null,'
     fi
-    if [[ -n "${BATCH_ERROR_DETAILS[i]}" ]]; then
+    if [[ -n "${BATCH_ERROR_DETAILS[i]:-}" ]]; then
       printf '"error_detail":"%s"' "$(json_escape_str "${BATCH_ERROR_DETAILS[i]}")"
     else
       printf '"error_detail":null'
@@ -1349,9 +1352,9 @@ render_batch_pretty() {
   echo ""
   for (( i=0; i<total; i++ )); do
     printf -- '--- %s ---\n' "${BATCH_PATHS[i]}"
-    if [[ -n "${BATCH_ERROR_CODES[i]}" ]]; then
-      printf 'error: %s — %s\n' "${BATCH_ERROR_CODES[i]}" "${BATCH_ERROR_DETAILS[i]}"
-    elif [[ -n "${BATCH_DIFFS[i]}" ]]; then
+    if [[ -n "${BATCH_ERROR_CODES[i]:-}" ]]; then
+      printf 'error: %s — %s\n' "${BATCH_ERROR_CODES[i]}" "${BATCH_ERROR_DETAILS[i]:-}"
+    elif [[ -n "${BATCH_DIFFS[i]:-}" ]]; then
       echo "${BATCH_DIFFS[i]}"
     else
       echo "(no diff)"
@@ -1364,7 +1367,7 @@ render_batch_paths() {
   local total=${#BATCH_PATHS[@]}
   local i
   for (( i=0; i<total; i++ )); do
-    [[ "${BATCH_APPLIED[i]}" == "true" ]] && echo "${BATCH_PATHS[i]}"
+    [[ "${BATCH_APPLIED[i]:-false}" == "true" ]] && echo "${BATCH_PATHS[i]}"
   done
 }
 
@@ -1489,43 +1492,73 @@ parse_args() {
         ;;
       --function)
         [[ -n "${2:-}" ]] || { ERROR_CODE="invalid_args"; die "Missing value for --function"; }
+        if [[ -n "$SHORTCUT_FLAG" ]]; then
+          ERROR_CODE="invalid_args"
+          die "Only one symbol shortcut may be used at a time: --$SHORTCUT_FLAG and --function"
+        fi
         SHORTCUT_SYMBOL="$2"
         SHORTCUT_TYPE="function"
+        SHORTCUT_FLAG="function"
         _TELEM_FLAGS+=" --function"
         shift 2
         ;;
       --class)
         [[ -n "${2:-}" ]] || { ERROR_CODE="invalid_args"; die "Missing value for --class"; }
+        if [[ -n "$SHORTCUT_FLAG" ]]; then
+          ERROR_CODE="invalid_args"
+          die "Only one symbol shortcut may be used at a time: --$SHORTCUT_FLAG and --class"
+        fi
         SHORTCUT_SYMBOL="$2"
         SHORTCUT_TYPE="class"
+        SHORTCUT_FLAG="class"
         _TELEM_FLAGS+=" --class"
         shift 2
         ;;
       --method)
         [[ -n "${2:-}" ]] || { ERROR_CODE="invalid_args"; die "Missing value for --method"; }
+        if [[ -n "$SHORTCUT_FLAG" ]]; then
+          ERROR_CODE="invalid_args"
+          die "Only one symbol shortcut may be used at a time: --$SHORTCUT_FLAG and --method"
+        fi
         SHORTCUT_SYMBOL="$2"
         SHORTCUT_TYPE="function"
+        SHORTCUT_FLAG="method"
         _TELEM_FLAGS+=" --method"
         shift 2
         ;;
       --import)
         [[ -n "${2:-}" ]] || { ERROR_CODE="invalid_args"; die "Missing value for --import"; }
+        if [[ -n "$SHORTCUT_FLAG" ]]; then
+          ERROR_CODE="invalid_args"
+          die "Only one symbol shortcut may be used at a time: --$SHORTCUT_FLAG and --import"
+        fi
         SHORTCUT_SYMBOL="$2"
         SHORTCUT_TYPE="import"
+        SHORTCUT_FLAG="import"
         _TELEM_FLAGS+=" --import"
         shift 2
         ;;
       --constant)
         [[ -n "${2:-}" ]] || { ERROR_CODE="invalid_args"; die "Missing value for --constant"; }
+        if [[ -n "$SHORTCUT_FLAG" ]]; then
+          ERROR_CODE="invalid_args"
+          die "Only one symbol shortcut may be used at a time: --$SHORTCUT_FLAG and --constant"
+        fi
         SHORTCUT_SYMBOL="$2"
         SHORTCUT_TYPE="constant"
+        SHORTCUT_FLAG="constant"
         _TELEM_FLAGS+=" --constant"
         shift 2
         ;;
       --type)
         [[ -n "${2:-}" ]] || { ERROR_CODE="invalid_args"; die "Missing value for --type"; }
+        if [[ -n "$SHORTCUT_FLAG" ]]; then
+          ERROR_CODE="invalid_args"
+          die "Only one symbol shortcut may be used at a time: --$SHORTCUT_FLAG and --type"
+        fi
         SHORTCUT_SYMBOL="$2"
         SHORTCUT_TYPE="type"
+        SHORTCUT_FLAG="type"
         _TELEM_FLAGS+=" --type"
         shift 2
         ;;

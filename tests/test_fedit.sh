@@ -464,6 +464,25 @@ test_json_precondition_error() {
   fi
 }
 
+test_batch_json_error_output() {
+  if ! command -v python3 >/dev/null 2>&1; then
+    pass "Batch JSON error test skipped (python3 not available)"
+    return 0
+  fi
+  local a="${TEST_DIR}/batch_json_err_a.py" b="${TEST_DIR}/batch_json_err_b.py"
+  echo 'x = 1' > "$a"
+  echo 'x = 1' > "$b"
+  local output rc=0
+  output=$(printf '%s\n' "$a" "$b" | FSUITE_TELEMETRY=0 "${FEDIT}" -o json --targets-file - --targets-format paths --replace 'missing_text' --with 'x = 2' 2>/dev/null) || rc=$?
+  if (( rc != 0 )) && printf '%s' "$output" | python3 -m json.tool >/dev/null 2>&1 && \
+     [[ "$output" == *'"mode":"patch_batch"'* ]] && [[ "$output" == *'"results":['* ]] && \
+     [[ "$output" == *'"error_code":"replace_missing"'* ]]; then
+    pass "Batch failures render the batch JSON envelope"
+  else
+    fail "Batch JSON failures should render batch-specific structure" "rc=$rc output=$output"
+  fi
+}
+
 test_dollar_payload_preserved() {
   reset_fixture "single.py"
   FSUITE_TELEMETRY=0 "${FEDIT}" "${TEST_DIR}/single.py" --replace 'return False' --with 'return "$1 \\U \\L ${value}"' --apply >/dev/null 2>&1 || {
@@ -650,6 +669,17 @@ test_method_aliases_function() {
     pass "--method aliases --function identically"
   else
     fail "--method should produce identical output to --function"
+  fi
+}
+
+test_multiple_shortcuts_conflict() {
+  local rc=0 output
+  reset_fixture "auth.py"
+  output=$(FSUITE_TELEMETRY=0 "${FEDIT}" "${TEST_DIR}/auth.py" --function authenticate --class AuthHandler --replace 'return False' --with 'return deny()' 2>&1) || rc=$?
+  if (( rc != 0 )) && [[ "$output" == *'Only one symbol shortcut may be used at a time'* ]]; then
+    pass "Multiple symbol shortcuts are rejected"
+  else
+    fail "Multiple symbol shortcuts should fail closed" "rc=$rc output=$output"
   fi
 }
 
@@ -921,6 +951,7 @@ main() {
   run_test "JSON error output" test_json_error_output
   run_test "JSON anchor ambiguous" test_json_anchor_ambiguous_error
   run_test "JSON precondition error" test_json_precondition_error
+  run_test "Batch JSON error output" test_batch_json_error_output
   run_test "Dollar payload preservation" test_dollar_payload_preserved
   run_test "Binary payload rejection" test_binary_payload_rejected
   run_test "Paths output" test_paths_output_only_when_applied
@@ -934,6 +965,7 @@ main() {
   run_test "Function shortcut" test_function_shortcut
   run_test "Class shortcut" test_class_shortcut
   run_test "Shortcut+symbol conflict" test_shortcut_symbol_conflict
+  run_test "Multiple shortcuts conflict" test_multiple_shortcuts_conflict
   run_test "Method aliases function" test_method_aliases_function
 
   # --- Batch mode tests (12) ---
