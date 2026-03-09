@@ -880,14 +880,16 @@ test_exported_typescript_function_shortcut() {
     fail "--function should work on exported TypeScript functions"
     return
   }
-  if grep -q "export function y() { const limit = MAX_SIZE; return 99; }" "${TEST_DIR}/types.ts" \
-     && grep -q "export function x(): CustomType { return { name: 'x' }; }" "${TEST_DIR}/types.ts" \
-     && grep -q "export default async function z() { return y(); }" "${TEST_DIR}/types.ts"; then
-    pass "Exported TypeScript function shortcut scopes correctly"
-  else
-    fail "Exported TypeScript function shortcut should edit only the targeted export"
-  fi
-}
+    if grep -q "const MAX_SIZE = 10;" "${TEST_DIR}/types.ts" \
+       && grep -q "export type CustomType = { name: string };" "${TEST_DIR}/types.ts" \
+       && grep -q "export function y() { const limit = MAX_SIZE; return 99; }" "${TEST_DIR}/types.ts" \
+       && grep -q "export function x(): CustomType { return { name: 'x' }; }" "${TEST_DIR}/types.ts" \
+       && grep -q "export default async function z() { return y(); }" "${TEST_DIR}/types.ts"; then
+      pass "Exported TypeScript function shortcut scopes correctly"
+    else
+      fail "Exported TypeScript function shortcut should edit only the targeted export"
+    fi
+  }
 
 # ==============================
 # Batch Mode Tests

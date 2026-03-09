@@ -1141,7 +1141,7 @@ if missing:
     sys.exit(0)
 print('OK')
 PY
-  rm -f "$_tmp_json"
+    rm -f "$_tmp_json"
 }
 
 _assert_symbol_type_for_text() {
@@ -1164,11 +1164,41 @@ if not files:
     sys.exit(0)
 matches = [s for s in files[0].get("symbols", []) if needle in (s.get("text") or "")]
 if not matches:
-    print("NOT_FOUND")
+    print("OK")
     sys.exit(0)
 actual = matches[0].get("type")
 if actual != expected:
     print(f"WRONG_TYPE:{actual}")
+    sys.exit(0)
+print("OK")
+PY
+  rm -f "$_tmp_json"
+}
+
+_assert_symbol_type_not_present_for_text() {
+  local file="$1"
+  local text_fragment="$2"
+  local blocked_type="$3"
+  local output _tmp_json
+  output=$(FSUITE_TELEMETRY=0 "${FMAP}" -o json "$file" 2>&1)
+  _tmp_json="$(mktemp)"
+  printf '%s\n' "$output" > "$_tmp_json"
+  python3 - "$_tmp_json" "$text_fragment" "$blocked_type" <<'PY'
+import json, sys
+with open(sys.argv[1]) as f:
+    data = json.load(f)
+needle = sys.argv[2]
+blocked = sys.argv[3]
+files = data.get("files") or []
+if not files:
+    print("NO_FILES")
+    sys.exit(0)
+matches = [s for s in files[0].get("symbols", []) if needle in (s.get("text") or "")]
+if not matches:
+    print("OK")
+    sys.exit(0)
+if any((s.get("type") or "") == blocked for s in matches):
+    print(f"BLOCKED_TYPE:{blocked}")
     sys.exit(0)
 print("OK")
 PY
@@ -1255,6 +1285,17 @@ test_force_lang_swift() {
     pass "-L swift forces language detection"
   else
     fail "-L swift not effective" "Got: $output"
+  fi
+}
+
+test_swift_constants_are_screaming_case_only() {
+  local uppercase_property lowercase_property
+  uppercase_property=$(_assert_symbol_type_for_text "${TEST_DIR}/src/App.swift" "public let DEFAULT_PORT" "constant")
+  lowercase_property=$(_assert_symbol_type_not_present_for_text "${TEST_DIR}/src/App.swift" "let timeout: Int" "constant")
+  if [[ "$uppercase_property" == "OK" && "$lowercase_property" == "OK" ]]; then
+    pass "Swift constants stay SCREAMING_CASE-only"
+  else
+    fail "Swift constant classification is too broad" "${uppercase_property}|${lowercase_property}"
   fi
 }
 
@@ -1690,6 +1731,7 @@ main() {
   run_test "TypeScript exact parse" test_parse_typescript_exact
   run_test "TypeScript exported functions" test_typescript_exported_functions_classify_as_functions
   run_test "Swift exact parse" test_parse_swift_exact
+  run_test "Swift constants are SCREAMING_CASE-only" test_swift_constants_are_screaming_case_only
   run_test "Rust exact parse" test_parse_rust_exact
   run_test "Go exact parse" test_parse_go_exact
   run_test "Java exact parse" test_parse_java_exact

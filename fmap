@@ -601,7 +601,7 @@ extract_symbols() {
         "class:^[[:space:]]*((public|private|internal|fileprivate|open|final|indirect)[[:space:]]+)*(class|struct|enum|protocol|actor|extension)[[:space:]]"
         "import:^[[:space:]]*import[[:space:]]"
         "type:^[[:space:]]*((public|private|internal|fileprivate|open)[[:space:]]+)*(typealias|associatedtype)[[:space:]]"
-        "constant:^[[:space:]]*((public|private|internal|fileprivate|static)[[:space:]]+)*let[[:space:]]+[A-Z_a-z][_A-Za-z0-9]*"
+        "constant:^[[:space:]]*((public|private|internal|fileprivate|static)[[:space:]]+)*let[[:space:]]+[A-Z][A-Z0-9_]*"
       )
       ;;
     rust)
