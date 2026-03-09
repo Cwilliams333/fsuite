@@ -599,12 +599,22 @@ resolve_symbol_scope() {
     FSUITE_TELEMETRY=0 "$fmap_bin" -o json "$TARGET_PATH" > "$fmap_json_file"
   fi
 
-  result=$(perl -MJSON::PP -MCwd=abs_path,getcwd -MFile::Spec -e '
-    use strict;
-    use warnings;
-    my ($json_path, $target_path, $symbol_name, $symbol_type) = @ARGV;
-    open my $jf, "<:raw", $json_path or exit 90;
-    local $/;
+    result=$(perl -MJSON::PP -MCwd=abs_path,getcwd -MFile::Spec -e '
+      use strict;
+      use warnings;
+      sub extracted_symbol_name {
+        my ($type, $text) = @_;
+        return $1 if $text =~ /\b(?:async[[:space:]]+)?function[[:space:]]+([_a-zA-Z][_a-zA-Z0-9]*)\b/;
+        return $1 if $text =~ /\bclass[[:space:]]+([_a-zA-Z][_a-zA-Z0-9]*)\b/;
+        return $1 if $text =~ /\b(?:interface|type|enum)[[:space:]]+([_a-zA-Z][_a-zA-Z0-9]*)\b/;
+        return $1 if $text =~ /\b(?:const|let|var)[[:space:]]+([_a-zA-Z][_a-zA-Z0-9]*)\b/;
+        return $1 if $text =~ /\bexports\.([_a-zA-Z][_a-zA-Z0-9]*)\b/;
+        return $1 if $text =~ /\bmodule\.exports\.([_a-zA-Z][_a-zA-Z0-9]*)\b/;
+        return undef;
+      }
+      my ($json_path, $target_path, $symbol_name, $symbol_type) = @ARGV;
+      open my $jf, "<:raw", $json_path or exit 90;
+      local $/;
     my $json = <$jf>;
     my $data = JSON::PP::decode_json($json);
     my $json_dir = do {
@@ -630,14 +640,19 @@ resolve_symbol_scope() {
     }
     exit 20 unless $target;
     my @symbols = @{ $target->{symbols} || [] };
-    my @matches;
-    for my $idx (0 .. $#symbols) {
-      my $sym = $symbols[$idx];
-      next if $symbol_type && (($sym->{type} // q{}) ne $symbol_type);
-      my $text = $sym->{text} // q{};
-      next unless $text =~ /\b\Q$symbol_name\E\b/;
-      push @matches, $idx;
-    }
+      my @matches;
+      for my $idx (0 .. $#symbols) {
+        my $sym = $symbols[$idx];
+        next if $symbol_type && (($sym->{type} // q{}) ne $symbol_type);
+        my $text = $sym->{text} // q{};
+        my $name = extracted_symbol_name(($sym->{type} // q{}), $text);
+        if (defined $name) {
+          next unless $name eq $symbol_name;
+        } else {
+          next unless $text =~ /\b\Q$symbol_name\E\b/;
+        }
+        push @matches, $idx;
+      }
     exit 20 unless @matches;
     exit 21 if @matches > 1;
     my $idx = $matches[0];

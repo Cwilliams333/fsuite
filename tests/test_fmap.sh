@@ -52,6 +52,10 @@ export default class App {
     constructor() {}
 }
 
+export function bootstrap() {
+    return startServer(3000);
+}
+
 function startServer(port) {
     return express().listen(port);
 }
@@ -61,6 +65,9 @@ export const handler = async (req, res) => {
 };
 
 module.exports = { startServer };
+exports.stopServer = function stopServer(server) {
+    return server.close();
+};
 JSEOF
 
   # TypeScript fixtures
@@ -87,10 +94,43 @@ export function validateUser(user: UserProfile): boolean {
     return true;
 }
 
+export default async function bootstrapUser(user: UserProfile): Promise<boolean> {
+    return validateUser(user);
+}
+
 abstract class BaseService {
     abstract connect(): void;
 }
 TSEOF
+
+  # Swift fixtures
+  cat > "${TEST_DIR}/src/App.swift" <<'SWIFTEOF'
+import Foundation
+
+public let DEFAULT_PORT = 8080
+
+public protocol Authenticating {
+    func authenticate(user: String) -> Bool
+}
+
+public struct SessionConfig {
+    let timeout: Int
+}
+
+public typealias AuthResult = Result<Bool, Error>
+
+public final class AuthService: Authenticating {
+    func authenticate(user: String) -> Bool {
+        return !user.isEmpty
+    }
+}
+
+public extension AuthService {
+    static func bootstrap() -> AuthService {
+        return AuthService()
+    }
+}
+SWIFTEOF
 
   # Rust fixtures
   cat > "${TEST_DIR}/src/main.rs" <<'RSEOF'
@@ -1104,6 +1144,37 @@ PY
   rm -f "$_tmp_json"
 }
 
+_assert_symbol_type_for_text() {
+  local file="$1"
+  local text_fragment="$2"
+  local expected_type="$3"
+  local output _tmp_json
+  output=$(FSUITE_TELEMETRY=0 "${FMAP}" -o json "$file" 2>&1)
+  _tmp_json="$(mktemp)"
+  printf '%s\n' "$output" > "$_tmp_json"
+  python3 - "$_tmp_json" "$text_fragment" "$expected_type" <<'PY'
+import json, sys
+with open(sys.argv[1]) as f:
+    data = json.load(f)
+needle = sys.argv[2]
+expected = sys.argv[3]
+files = data.get("files") or []
+if not files:
+    print("NO_FILES")
+    sys.exit(0)
+matches = [s for s in files[0].get("symbols", []) if needle in (s.get("text") or "")]
+if not matches:
+    print("NOT_FOUND")
+    sys.exit(0)
+actual = matches[0].get("type")
+if actual != expected:
+    print(f"WRONG_TYPE:{actual}")
+    sys.exit(0)
+print("OK")
+PY
+  rm -f "$_tmp_json"
+}
+
 test_parse_python_exact() {
   local result
   result=$(_validate_lang_json "${TEST_DIR}/src/auth.py" "python" "function,class,import,constant" 6)
@@ -1116,7 +1187,7 @@ test_parse_python_exact() {
 
 test_parse_javascript_exact() {
   local result
-  result=$(_validate_lang_json "${TEST_DIR}/src/app.js" "javascript" "function,class,import" 4)
+  result=$(_validate_lang_json "${TEST_DIR}/src/app.js" "javascript" "function,class,import,export" 6)
   if [[ "$result" == "OK" ]]; then
     pass "JavaScript exact parse: all types found, no dupes, 4+ symbols"
   else
@@ -1126,11 +1197,64 @@ test_parse_javascript_exact() {
 
 test_parse_typescript_exact() {
   local result
-  result=$(_validate_lang_json "${TEST_DIR}/src/types.ts" "typescript" "import,type,class" 5)
+  result=$(_validate_lang_json "${TEST_DIR}/src/types.ts" "typescript" "import,type,class,function" 6)
   if [[ "$result" == "OK" ]]; then
     pass "TypeScript exact parse: all types found, no dupes, 5+ symbols"
   else
     fail "TypeScript exact parse failed" "$result"
+  fi
+}
+
+test_javascript_exported_forms_classify_correctly() {
+  local exported_decl exported_arrow commonjs_assign
+  exported_decl=$(_assert_symbol_type_for_text "${TEST_DIR}/src/app.js" "export function bootstrap()" "function")
+  exported_arrow=$(_assert_symbol_type_for_text "${TEST_DIR}/src/app.js" "export const handler = async" "function")
+  commonjs_assign=$(_assert_symbol_type_for_text "${TEST_DIR}/src/app.js" "exports.stopServer = function" "export")
+  if [[ "$exported_decl" == "OK" && "$exported_arrow" == "OK" && "$commonjs_assign" == "OK" ]]; then
+    pass "JavaScript exported forms classify correctly"
+  else
+    fail "JavaScript exported forms classification failed" "${exported_decl}|${exported_arrow}|${commonjs_assign}"
+  fi
+}
+
+test_typescript_exported_functions_classify_as_functions() {
+  local exported_decl exported_default
+  exported_decl=$(_assert_symbol_type_for_text "${TEST_DIR}/src/types.ts" "export function validateUser" "function")
+  exported_default=$(_assert_symbol_type_for_text "${TEST_DIR}/src/types.ts" "export default async function bootstrapUser" "function")
+  if [[ "$exported_decl" == "OK" && "$exported_default" == "OK" ]]; then
+    pass "TypeScript exported functions classify as functions"
+  else
+    fail "TypeScript exported function classification failed" "${exported_decl}|${exported_default}"
+  fi
+}
+
+test_dir_swift_symbols() {
+  local output
+  output=$(FSUITE_TELEMETRY=0 "${FMAP}" "${TEST_DIR}/src" 2>&1)
+  if [[ "$output" =~ "App.swift" ]] && [[ "$output" =~ "protocol" ]] && [[ "$output" =~ "bootstrap" ]]; then
+    pass "Swift symbols found in directory mode"
+  else
+    fail "Swift symbols missing in directory mode" "$output"
+  fi
+}
+
+test_parse_swift_exact() {
+  local result
+  result=$(_validate_lang_json "${TEST_DIR}/src/App.swift" "swift" "function,class,import,type,constant" 7)
+  if [[ "$result" == "OK" ]]; then
+    pass "Swift exact parse: all types found, no dupes, 7+ symbols"
+  else
+    fail "Swift exact parse failed" "$result"
+  fi
+}
+
+test_force_lang_swift() {
+  local output
+  output=$(FSUITE_TELEMETRY=0 "${FMAP}" -L swift "${TEST_DIR}/src/App.swift" 2>&1)
+  if [[ "$output" =~ "(swift)" ]]; then
+    pass "-L swift forces language detection"
+  else
+    fail "-L swift not effective" "Got: $output"
   fi
 }
 
@@ -1443,7 +1567,7 @@ test_force_lang_yaml() {
 test_bad_lang_lists_new_languages() {
   local output rc
   output=$(FSUITE_TELEMETRY=0 "${FMAP}" -L badlang "${TEST_DIR}" 2>&1) || rc=$?
-  if [[ "${rc:-0}" -eq 2 ]] && [[ "$output" =~ "dockerfile" ]] && [[ "$output" =~ "makefile" ]] && [[ "$output" =~ "yaml" ]]; then
+  if [[ "${rc:-0}" -eq 2 ]] && [[ "$output" =~ "swift" ]] && [[ "$output" =~ "dockerfile" ]] && [[ "$output" =~ "makefile" ]] && [[ "$output" =~ "yaml" ]]; then
     pass "Invalid --lang error lists new languages"
   else
     fail "Invalid --lang error missing new languages" "rc=${rc:-0}, output=$output"
@@ -1514,6 +1638,7 @@ main() {
   run_test "Go symbols" test_dir_go_symbols
   run_test "Ruby symbols" test_dir_ruby_symbols
   run_test "Java symbols" test_dir_java_symbols
+  run_test "Swift symbols" test_dir_swift_symbols
 
   # Single file mode
   run_test "Single file detect" test_single_file_detect
@@ -1561,7 +1686,10 @@ main() {
   # Per-language exact parsing
   run_test "Python exact parse" test_parse_python_exact
   run_test "JavaScript exact parse" test_parse_javascript_exact
+  run_test "JavaScript exported forms" test_javascript_exported_forms_classify_correctly
   run_test "TypeScript exact parse" test_parse_typescript_exact
+  run_test "TypeScript exported functions" test_typescript_exported_functions_classify_as_functions
+  run_test "Swift exact parse" test_parse_swift_exact
   run_test "Rust exact parse" test_parse_rust_exact
   run_test "Go exact parse" test_parse_go_exact
   run_test "Java exact parse" test_parse_java_exact
@@ -1598,6 +1726,7 @@ main() {
   run_test "YAML uses: import" test_yaml_github_actions_uses
   run_test "YAML exact parse" test_parse_yaml_exact
   run_test "Force lang yaml" test_force_lang_yaml
+  run_test "Force lang swift" test_force_lang_swift
 
   # New language validation
   run_test "Invalid --lang lists new langs" test_bad_lang_lists_new_languages

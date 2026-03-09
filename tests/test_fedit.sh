@@ -76,6 +76,7 @@ export type CustomType = { name: string };
 export type OtherType = { name: string };
 export function x(): CustomType { return { name: 'x' }; }
 export function y() { const limit = MAX_SIZE; return limit; }
+export default async function z() { return y(); }
 EOF
 
   echo 'old content' > "${TEST_DIR}/replace_me.txt"
@@ -873,6 +874,21 @@ test_type_shortcut() {
   fi
 }
 
+test_exported_typescript_function_shortcut() {
+  reset_fixture "types.ts"
+  FSUITE_TELEMETRY=0 "${FEDIT}" "${TEST_DIR}/types.ts" --function y --replace 'return limit;' --with 'return 99;' --apply >/dev/null 2>&1 || {
+    fail "--function should work on exported TypeScript functions"
+    return
+  }
+  if grep -q "export function y() { const limit = MAX_SIZE; return 99; }" "${TEST_DIR}/types.ts" \
+     && grep -q "export function x(): CustomType { return { name: 'x' }; }" "${TEST_DIR}/types.ts" \
+     && grep -q "export default async function z() { return y(); }" "${TEST_DIR}/types.ts"; then
+    pass "Exported TypeScript function shortcut scopes correctly"
+  else
+    fail "Exported TypeScript function shortcut should edit only the targeted export"
+  fi
+}
+
 # ==============================
 # Batch Mode Tests
 # ==============================
@@ -1241,7 +1257,7 @@ main() {
   run_test "Spaces in filename" test_spaces_in_filename
   run_test "Tier 3 telemetry" test_tier3_telemetry
 
-  # --- Symbol shortcut tests (7) ---
+  # --- Symbol shortcut tests (9) ---
   run_test "Function shortcut" test_function_shortcut
   run_test "Class shortcut" test_class_shortcut
   run_test "Shortcut+symbol conflict" test_shortcut_symbol_conflict
@@ -1250,6 +1266,7 @@ main() {
   run_test "Import shortcut" test_import_shortcut
   run_test "Constant shortcut" test_constant_shortcut
   run_test "Type shortcut" test_type_shortcut
+  run_test "Exported TS function shortcut" test_exported_typescript_function_shortcut
 
   # --- Batch mode tests (17) ---
   run_test "Batch paths dry-run" test_batch_paths_dry_run

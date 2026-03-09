@@ -250,6 +250,69 @@ fmetrics predict /project
 
 ---
 
+## Language Support
+
+`fsuite` works on any normal text file for `fsearch`, `fcontent`, `fread`, and plain `fedit`.
+The table below tracks the **language-aware structural layer** in `fmap` and the **symbol-scoped** edit path that depends on it.
+
+### Current Structural Support
+
+| Language / ecosystem | `fmap` support | Symbol-scoped `fedit` | Notes |
+|---|---:|---:|---|
+| Python | Yes | Yes | Core AI / automation / backend |
+| JavaScript | Yes | Yes | Web, Node, agent tooling |
+| TypeScript | Yes | Yes | Web, agents, infrastructure tooling |
+| Swift | Yes | Yes | Apple-native app analysis |
+| Rust | Yes | Yes | Systems / infra / performance |
+| Go | Yes | Yes | Services / CLIs / platform code |
+| Java | Yes | Yes | Enterprise / Android-adjacent |
+| C | Yes | Yes | Systems / embedded |
+| C++ | Yes | Yes | Native / performance-heavy code |
+| Ruby | Yes | Yes | Legacy web / scripting |
+| Lua | Yes | Yes | Embedding / config / game tooling |
+| PHP | Yes | Yes | Large real-world web footprint |
+| Bash / Shell | Yes | Yes | DevOps / scripts / automation |
+| Dockerfile | Yes | Yes | Container workflows |
+| Makefile | Yes | Yes | Build systems |
+| YAML | Yes | Yes | CI / config / infra manifests |
+
+### Recommended Next Support (2026)
+
+| Language / ecosystem | Why it matters | Priority | Notes |
+|---|---|---:|---|
+| Kotlin | Android is Kotlin-first; strongest mobile gap after Swift | P0 | Best next mobile payoff |
+| C# | Large .NET / Unity / enterprise footprint | P0 | Strong cross-industry demand |
+| Dart / Flutter | Cross-platform mobile codebases | P1 | Good after Kotlin |
+| HCL / Terraform | Infra / platform repo coverage | P1 | High-value for agent audits |
+| Objective-C | Legacy Apple codebases | P1 | Useful after Swift |
+| Mojo | Emerging AI / GPU language | P2 | Strategic watchlist |
+
+### Ecosystem Bundles We Want
+
+| Bundle | What it should cover |
+|---|---|
+| Apple-lite | Swift, `Package.swift`, `Info.plist`, later Objective-C |
+| Android-lite | Kotlin, Gradle, Gradle Kotlin DSL, `AndroidManifest.xml`, resource/layout XML |
+| Python AI | Python plus better real-world recipes for PyTorch, JAX, NumPy, PyTensor |
+| Infra | HCL / Terraform, Docker, CI config surfaces |
+| Agent tooling | TypeScript / Python patterns for MCP, tool routing, workflow harnesses |
+
+### Vote On Next Support
+
+Open an issue or discussion with:
+
+- the language or ecosystem you want
+- 1-3 public repos we should test against
+- the symbol types that matter most (`function`, `class`, `type`, `import`, `export`, `constant`)
+- whether you care more about:
+  - reading / mapping
+  - editing
+  - mobile app analysis
+  - AI / ML codebases
+  - infra / DevOps code
+
+---
+
 ## Fast Paths (copy/paste)
 
 Four workflows that cover the common cases without improvisation. Copy, paste, go.
@@ -446,7 +509,7 @@ fmap [OPTIONS] [path]
 
 - Zero dependencies beyond `grep` (uses `grep -n -E -I`)
 - Three modes: directory (recursive), single file, piped file list from stdin
-- 12 languages: Python, JavaScript, TypeScript, Rust, Go, Java, C, C++, Ruby, Lua, PHP, Bash
+  - 16 languages / formats: Python, JavaScript, TypeScript, Swift, Rust, Go, Java, C, C++, Ruby, Lua, PHP, Bash, Dockerfile, Makefile, YAML
 - Bash function detection: both `name() {` and `function name {` forms
 - Shebang fallback for extensionless files (`#!/usr/bin/env bash`)
 - Symbol type filtering (`-t function`, `-t class`, etc.)

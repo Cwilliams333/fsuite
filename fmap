@@ -194,7 +194,7 @@ OPTIONS
 
   -L, --lang <lang>
       Force language (auto-detect by default).
-      Supported: python, javascript, typescript, rust, go, java,
+      Supported: python, javascript, typescript, swift, rust, go, java,
                  c, cpp, ruby, lua, php, bash, dockerfile, makefile, yaml
 
   -t, --type <type>
@@ -225,7 +225,7 @@ OPTIONS
       Print version and exit.
 
 SUPPORTED LANGUAGES
-  Python, JavaScript, TypeScript, Rust, Go, Java, C, C++,
+  Python, JavaScript, TypeScript, Swift, Rust, Go, Java, C, C++,
   Ruby, Lua, PHP, Bash/Shell, Dockerfile, Makefile, YAML
 
 HEADLESS / AI AGENT USAGE
@@ -329,8 +329,8 @@ if [[ -n "$FILTER_TYPE" ]]; then
 fi
 if [[ -n "$FORCE_LANG" ]]; then
   case "$FORCE_LANG" in
-    python|javascript|typescript|rust|go|java|c|cpp|ruby|lua|php|bash|dockerfile|makefile|yaml) ;;
-    *) die "Invalid --lang: $FORCE_LANG (valid: python, javascript, typescript, rust, go, java, c, cpp, ruby, lua, php, bash, dockerfile, makefile, yaml)" ;;
+    python|javascript|typescript|swift|rust|go|java|c|cpp|ruby|lua|php|bash|dockerfile|makefile|yaml) ;;
+    *) die "Invalid --lang: $FORCE_LANG (valid: python, javascript, typescript, swift, rust, go, java, c, cpp, ruby, lua, php, bash, dockerfile, makefile, yaml)" ;;
   esac
 fi
 
@@ -499,6 +499,7 @@ detect_language() {
     py|pyw|pyi) echo "python"; return ;;
     js|mjs|cjs|jsx) echo "javascript"; return ;;
     ts|tsx|mts|cts) echo "typescript"; return ;;
+    swift) echo "swift"; return ;;
     rs) echo "rust"; return ;;
     go) echo "go"; return ;;
     java) echo "java"; return ;;
@@ -566,22 +567,23 @@ extract_symbols() {
       ;;
     javascript)
       patterns=(
-        "function:^[[:space:]]*(async[[:space:]]+)?function[[:space:]]"
-        "function:^[[:space:]]*(const|let|var)[[:space:]]+[_a-zA-Z][_a-zA-Z0-9]*[[:space:]]*=[[:space:]]*(async[[:space:]]*)?\("
-        "function:^[[:space:]]*(const|let|var)[[:space:]]+[_a-zA-Z][_a-zA-Z0-9]*[[:space:]]*=[[:space:]]*(async[[:space:]]*)?\([^)]*\)[[:space:]]*=>"
+        "function:^[[:space:]]*(export[[:space:]]+)?(default[[:space:]]+)?(async[[:space:]]+)?function[[:space:]]"
+        "function:^[[:space:]]*(export[[:space:]]+)?(const|let|var)[[:space:]]+[_a-zA-Z][_a-zA-Z0-9]*[[:space:]]*=[[:space:]]*(async[[:space:]]*)?\("
+        "function:^[[:space:]]*(export[[:space:]]+)?(const|let|var)[[:space:]]+[_a-zA-Z][_a-zA-Z0-9]*[[:space:]]*=[[:space:]]*(async[[:space:]]*)?\([^)]*\)[[:space:]]*=>"
         "class:^[[:space:]]*(export[[:space:]]+)?(default[[:space:]]+)?class[[:space:]]"
         "import:^[[:space:]]*import[[:space:]]"
         "import:^[[:space:]]*const[[:space:]]+.*=[[:space:]]*require\("
         "export:^[[:space:]]*export[[:space:]]+(default[[:space:]]+)?(function|class|const|let|var|async)"
         "export:^[[:space:]]*module\.exports"
+        "export:^[[:space:]]*exports\.[_a-zA-Z][_a-zA-Z0-9]*[[:space:]]*="
         "constant:^[[:space:]]*const[[:space:]]+[A-Z][A-Z0-9_]*[[:space:]]*="
       )
       ;;
     typescript)
       patterns=(
-        "function:^[[:space:]]*(async[[:space:]]+)?function[[:space:]]"
-        "function:^[[:space:]]*(const|let|var)[[:space:]]+[_a-zA-Z][_a-zA-Z0-9]*[[:space:]]*=[[:space:]]*(async[[:space:]]*)?\("
-        "function:^[[:space:]]*(const|let|var)[[:space:]]+[_a-zA-Z][_a-zA-Z0-9]*[[:space:]]*=[[:space:]]*(async[[:space:]]*)?\([^)]*\)[[:space:]]*=>"
+        "function:^[[:space:]]*(export[[:space:]]+)?(default[[:space:]]+)?(async[[:space:]]+)?function[[:space:]]"
+        "function:^[[:space:]]*(export[[:space:]]+)?(const|let|var)[[:space:]]+[_a-zA-Z][_a-zA-Z0-9]*[[:space:]]*=[[:space:]]*(async[[:space:]]*)?\("
+        "function:^[[:space:]]*(export[[:space:]]+)?(const|let|var)[[:space:]]+[_a-zA-Z][_a-zA-Z0-9]*[[:space:]]*=[[:space:]]*(async[[:space:]]*)?\([^)]*\)[[:space:]]*=>"
         "class:^[[:space:]]*(export[[:space:]]+)?(default[[:space:]]+)?(abstract[[:space:]]+)?class[[:space:]]"
         "import:^[[:space:]]*import[[:space:]]"
         "type:^[[:space:]]*(export[[:space:]]+)?interface[[:space:]]"
@@ -589,7 +591,17 @@ extract_symbols() {
         "type:^[[:space:]]*(export[[:space:]]+)?(const[[:space:]]+)?enum[[:space:]]"
         "export:^[[:space:]]*export[[:space:]]+(default[[:space:]]+)?(function|class|const|let|var|async|interface|type|enum|abstract)"
         "export:^[[:space:]]*module\.exports"
+        "export:^[[:space:]]*export[[:space:]]*="
         "constant:^[[:space:]]*const[[:space:]]+[A-Z][A-Z0-9_]*[[:space:]]*[:=]"
+      )
+      ;;
+    swift)
+      patterns=(
+        "function:^[[:space:]]*((public|private|internal|fileprivate|open|final|static|class|override|mutating|nonmutating|convenience|required|async|throws|rethrows)[[:space:]]+)*func[[:space:]]"
+        "class:^[[:space:]]*((public|private|internal|fileprivate|open|final|indirect)[[:space:]]+)*(class|struct|enum|protocol|actor|extension)[[:space:]]"
+        "import:^[[:space:]]*import[[:space:]]"
+        "type:^[[:space:]]*((public|private|internal|fileprivate|open)[[:space:]]+)*(typealias|associatedtype)[[:space:]]"
+        "constant:^[[:space:]]*((public|private|internal|fileprivate|static)[[:space:]]+)*let[[:space:]]+[A-Z_a-z][_A-Za-z0-9]*"
       )
       ;;
     rust)
