@@ -262,6 +262,7 @@ The table below tracks the **language-aware structural layer** in `fmap` and the
 | Python | Yes | Yes | Core AI / automation / backend |
 | JavaScript | Yes | Yes | Web, Node, agent tooling |
 | TypeScript | Yes | Yes | Web, agents, infrastructure tooling |
+| Kotlin | Yes | Yes | Android / Kotlin-first mobile repos |
 | Swift | Yes | Yes | Apple-native app analysis |
 | Rust | Yes | Yes | Systems / infra / performance |
 | Go | Yes | Yes | Services / CLIs / platform code |
@@ -280,9 +281,8 @@ The table below tracks the **language-aware structural layer** in `fmap` and the
 
 | Language / ecosystem | Why it matters | Priority | Notes |
 |---|---|---:|---|
-| Kotlin | Android is Kotlin-first; strongest mobile gap after Swift | P0 | Best next mobile payoff |
 | C# | Large .NET / Unity / enterprise footprint | P0 | Strong cross-industry demand |
-| Dart / Flutter | Cross-platform mobile codebases | P1 | Good after Kotlin |
+| Dart / Flutter | Cross-platform mobile codebases | P1 | Strong next mobile follow-up |
 | HCL / Terraform | Infra / platform repo coverage | P1 | High-value for agent audits |
 | Objective-C | Legacy Apple codebases | P1 | Useful after Swift |
 | Mojo | Emerging AI / GPU language | P2 | Strategic watchlist |
@@ -292,7 +292,7 @@ The table below tracks the **language-aware structural layer** in `fmap` and the
 | Bundle | What it should cover |
 |---|---|
 | Apple-lite | Swift, `Package.swift`, `Info.plist`, later Objective-C |
-| Android-lite | Kotlin, Gradle, Gradle Kotlin DSL, `AndroidManifest.xml`, resource/layout XML |
+| Android-lite | Kotlin, Gradle, Gradle Kotlin DSL, `AndroidManifest.xml`, resource/layout XML; narrow manifest/layout reconnaissance now lands in `fmap` |
 | Python AI | Python plus better real-world recipes for PyTorch, JAX, NumPy, PyTensor |
 | Infra | HCL / Terraform, Docker, CI config surfaces |
 | Agent tooling | TypeScript / Python patterns for MCP, tool routing, workflow harnesses |
@@ -509,7 +509,7 @@ fmap [OPTIONS] [path]
 
 - Zero dependencies beyond `grep` (uses `grep -n -E -I`)
 - Three modes: directory (recursive), single file, piped file list from stdin
-  - 16 languages / formats: Python, JavaScript, TypeScript, Swift, Rust, Go, Java, C, C++, Ruby, Lua, PHP, Bash, Dockerfile, Makefile, YAML
+  - 17 languages / formats: Python, JavaScript, TypeScript, Kotlin, Swift, Rust, Go, Java, C, C++, Ruby, Lua, PHP, Bash, Dockerfile, Makefile, YAML
 - Bash function detection: both `name() {` and `function name {` forms
 - Shebang fallback for extensionless files (`#!/usr/bin/env bash`)
 - Symbol type filtering (`-t function`, `-t class`, etc.)
