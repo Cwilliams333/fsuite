@@ -169,6 +169,18 @@ plugins {
 }
 KTSEOF
 
+  mkdir -p "${TEST_DIR}/src/app/src/main"
+  cat > "${TEST_DIR}/src/app/src/main/AndroidManifest.xml" <<'MANIFESTEOF'
+<manifest package="com.example.app">
+    <application android:name=".App">
+        <activity android:name=".MainActivity" />
+        <service android:name=".SyncService" />
+        <receiver android:name=".BootReceiver" />
+        <provider android:name=".DataProvider" />
+    </application>
+</manifest>
+MANIFESTEOF
+
   # Rust fixtures
   cat > "${TEST_DIR}/src/main.rs" <<'RSEOF'
 use std::collections::HashMap;
@@ -1387,6 +1399,36 @@ test_gradle_kts_detects_as_kotlin() {
   fi
 }
 
+test_dir_android_manifest_symbols() {
+  local output
+  output=$(FSUITE_TELEMETRY=0 "${FMAP}" "${TEST_DIR}/src/app/src/main/AndroidManifest.xml" 2>&1)
+  if [[ "$output" =~ "(android_manifest)" ]] && [[ "$output" =~ "activity" ]] && [[ "$output" =~ "service" ]]; then
+    pass "Android manifest symbols found"
+  else
+    fail "Android manifest symbols missing" "$output"
+  fi
+}
+
+test_parse_android_manifest_exact() {
+  local result
+  result=$(_validate_lang_json "${TEST_DIR}/src/app/src/main/AndroidManifest.xml" "android_manifest" "class" 5)
+  if [[ "$result" == "OK" ]]; then
+    pass "Android manifest exact parse: class symbols only, no dupes"
+  else
+    fail "Android manifest exact parse failed" "$result"
+  fi
+}
+
+test_android_manifest_is_path_scoped() {
+  local output
+  output=$(FSUITE_TELEMETRY=0 "${FMAP}" -o json "${TEST_DIR}/src/compose.yml" 2>&1)
+  if [[ "$output" != *"android_manifest"* ]]; then
+    pass "Android manifest detection stays path-scoped"
+  else
+    fail "Android manifest detection leaked into non-manifest files" "$output"
+  fi
+}
+
 test_parse_rust_exact() {
   local result
   result=$(_validate_lang_json "${TEST_DIR}/src/main.rs" "rust" "function,class,import,constant,type" 8)
@@ -1769,6 +1811,7 @@ main() {
     run_test "Java symbols" test_dir_java_symbols
     run_test "Swift symbols" test_dir_swift_symbols
     run_test "Kotlin symbols" test_dir_kotlin_symbols
+    run_test "Android manifest symbols" test_dir_android_manifest_symbols
 
   # Single file mode
   run_test "Single file detect" test_single_file_detect
@@ -1862,6 +1905,8 @@ main() {
     run_test "Force lang swift" test_force_lang_swift
     run_test "Force lang kotlin" test_force_lang_kotlin
     run_test "Gradle Kotlin DSL detection" test_gradle_kts_detects_as_kotlin
+    run_test "Android manifest exact parse" test_parse_android_manifest_exact
+    run_test "Android manifest path scoping" test_android_manifest_is_path_scoped
 
     # New language validation
     run_test "Invalid --lang lists new langs" test_bad_lang_lists_new_languages

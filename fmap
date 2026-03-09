@@ -491,6 +491,7 @@ detect_language() {
 
   # Basename-based detection for config files without standard extensions
   case "$base" in
+    AndroidManifest.xml) echo "android_manifest"; return ;;
     Dockerfile|Dockerfile.*|Containerfile|Containerfile.*|containerfile|containerfile.*) echo "dockerfile"; return ;;
     Makefile|makefile|GNUmakefile) echo "makefile"; return ;;
   esac
@@ -603,6 +604,15 @@ extract_symbols() {
           "import:^[[:space:]]*import[[:space:]]"
           "type:^[[:space:]]*((public|private|internal|protected)[[:space:]]+)*typealias[[:space:]]"
           "constant:^[[:space:]]*((public|private|internal|protected)[[:space:]]+)*(const[[:space:]]+)?val[[:space:]]+[A-Z][A-Z0-9_]*([[:space:]]*[:=]|$)"
+        )
+        ;;
+      android_manifest)
+        patterns=(
+          "class:^[[:space:]]*<application\\b"
+          "class:^[[:space:]]*<activity\\b"
+          "class:^[[:space:]]*<service\\b"
+          "class:^[[:space:]]*<receiver\\b"
+          "class:^[[:space:]]*<provider\\b"
         )
         ;;
       swift)
