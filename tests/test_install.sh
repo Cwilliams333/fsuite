@@ -125,7 +125,9 @@ test_fsuite_help_explains_flow() {
   output=$(FSUITE_TELEMETRY=0 "${prefix}/bin/fsuite" 2>&1)
 
   if [[ "$output" == *"Canonical agent flow"* ]] && \
-     [[ "$output" == *"ftree -> fsearch | fcontent -> fmap -> fread -> fedit -> fmetrics"* ]]; then
+     [[ "$output" == *"ftree -> fsearch | fcontent -> fmap -> fread -> fedit -> fmetrics"* ]] && \
+     [[ "$output" == *"Composable sensor suite"* ]] && \
+     [[ "$output" == *"Literal search is a strength here, not a fallback."* ]]; then
     pass "fsuite command explains the suite flow"
   else
     fail "fsuite command should explain the suite workflow" "Got: $output"

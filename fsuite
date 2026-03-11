@@ -36,7 +36,7 @@ print_help() {
   cat <<EOF
 fsuite ${VERSION}
 
-Seven operational tools. One headless workflow.
+Seven operational tools. One composable sensor suite.
 
   ftree     Scout the project once
   fsearch   Find candidate files
@@ -51,15 +51,24 @@ Canonical agent flow
   ftree -> fsearch | fcontent -> fmap -> fread -> fedit -> fmetrics
   Scout    Narrowing             Bridge   Read     Change    Measure
 
-Practical guidance
+First-contact mindset
 
-  - Use ftree first for broad orientation.
-  - Use fsearch to narrow candidate files.
-  - Use fcontent after narrowing, not as the first broad repo search.
-  - Treat fmap as the bridge from discovery to surgical reading and editing.
-  - Use fread once the seam is known.
-  - Use fedit with dry-run first, then --apply.
-  - Use fmetrics after execution if you care about telemetry and runtime history.
+  - Composable sensor suite. Not a single sacred path.
+  - There are stronger and weaker combinations, but no one true sequence.
+  - Stop overcompensating for weak default tools; trust the direct contract.
+  - Literal search is a strength here, not a fallback.
+  - Use -o json and -o paths aggressively.
+  - Treat fmap as the bridge in the middle, not only a producer before fread.
+  - fmap + fread is the power pair for understanding code.
+  - Use ftree intentionally and sparingly on large repos.
+  - Use fedit only after inspected context.
+  - Use fmetrics for observability, not as a reason to spam ftree.
+
+Strong combinations
+
+  - fsearch -> fmap
+  - fcontent -o paths -> fmap
+  - fsearch -> fcontent -o paths -> fmap
 
 Headless defaults
 
@@ -71,11 +80,11 @@ Headless defaults
 Examples
 
   fsuite flow
-  ftree --snapshot -o json /project
-  fsearch -o paths '*.ts' /project/src | fcontent -o paths "auth"
   fsearch -o paths '*.ts' /project/src | fmap -o json
+  fsearch -o paths '*.ts' /project/src | fcontent -o paths "auth" | fmap -o json
   fread -o json /project/src/auth.ts --around "function authenticate" -A 20
   fedit -o json /project/src/auth.ts --function validateLength --replace "return false;" --with "return true;"
+  ftree --snapshot -o json /project
   fmetrics import && fmetrics stats -o json
 
 Use each tool's --help for the full flag surface.
@@ -113,26 +122,37 @@ print_flow() {
   cat <<'EOF'
 Recommended workflow
 
-  1. ftree
-     Build the broad repo picture once.
+  1. fsuite
+     Load the suite-level mental model once.
 
-  2. fsearch
-     Narrow to likely files.
+  2. ftree
+     Build the broad repo picture once, then stop unless the target changes.
 
-  3. fcontent
-     Use only when exact textual confirmation is needed across the narrowed set.
+  3. fsearch or fcontent
+     Narrow to likely files by path or by literal evidence.
 
   4. fmap
-     Bridge discovery to structural understanding.
+     Bridge discovery to structural understanding in the middle of the pipeline.
 
   5. fread
-     Read the exact code seam now that the target is clear.
+     Pair with fmap to read the exact seam now that the target is clear.
 
   6. fedit
-     Preview and apply a surgical change.
+     Preview and apply a surgical change only after inspected context.
 
   7. fmetrics
      Measure runtime history and import telemetry if needed.
+
+Strong combinations:
+  - fsearch -> fmap
+  - fcontent -o paths -> fmap
+  - fsearch -> fcontent -o paths -> fmap
+  - fmap + fread
+
+Mindset:
+  - heuristic, not rigid rule
+  - literal search is a first-class narrowing move
+  - use -o json and -o paths aggressively
 
 Heuristic, not rigid rule:
   ftree -> fsearch | fcontent -> fmap -> fread -> fedit -> fmetrics
@@ -146,13 +166,16 @@ Examples
   # Scout once
   ftree --snapshot -o json /project
 
-  # Narrow candidates, then confirm exact text only if needed
-  fsearch -o paths '*.py' /project/src | fcontent -o paths "authenticate"
-
-  # Map structure before broad reads
+  # Narrow by path, then map structure
   fsearch -o paths '*.py' /project/src | fmap -o json
 
-  # Read the exact seam
+  # Narrow by literal evidence, then map structure
+  fcontent -o paths "authenticate" /project/src | fmap -o json
+
+  # Narrow twice when needed: path -> exact text -> structure
+  fsearch -o paths '*.py' /project/src | fcontent -o paths "authenticate" | fmap -o json
+
+  # fmap + fread is the power pair for understanding code
   fread -o json /project/src/auth.py --around "def authenticate" -B 5 -A 20
 
   # Preview and apply a patch

@@ -47,6 +47,7 @@ Works with **Claude Code**, **Codex**, **OpenCode**, and any shell-capable agent
 
 - [Why This Exists](#why-this-exists-the-lightbulb-moment)
 - [Quick Start](#quick-start)
+- [First-Contact Mindset](#first-contact-mindset)
 - [fsuite Help](#fsuite-help)
 - [Fast Paths](#fast-paths-copypaste)
 - [Tools](#tools)
@@ -112,6 +113,8 @@ AFTER execution:
   Search inside the narrowed set, patch surgically, then measure what actually happened and plan the next pass.
 ```
 
+> **Proof callout — Nightfox investigation:** In a live Nightfox runtime incident, the breakthrough came when the operator coached the agent to stop overcompensating and trust fsuite's direct contracts. The useful path was not a sacred sequence. It was a clean combination of `fsearch`, `fmap`, `fread`, and targeted `fcontent` that surfaced a real subprocess-lifecycle bug. The milestone was not just that the tools worked. It was that the agent stopped fighting them.
+
 The full unedited analysis is in **[AGENT-ANALYSIS.md](AGENT-ANALYSIS.md)** — the raw self-assessment, exactly as Claude Code wrote it after studying and testing every tool in this repo.
 
 That document is the pitch. Not because we wrote it, but because the agent did.
@@ -158,6 +161,26 @@ cd fsuite
 
 ---
 
+## First-Contact Mindset
+
+fsuite works best when the agent stops compensating for weak default tooling and starts reasoning natively with the contracts in front of it. This is a composable sensor suite, not a single sacred sequence. Some combinations are stronger than others, but the right move is to choose the smallest chain that increases certainty without flooding context.
+
+- Use `-o json` and `-o paths` aggressively. They are the default agent surfaces.
+- `ftree` is powerful, but use it intentionally and sparingly on large repos.
+- `fsearch -> fmap` is a strong default when you know the area but not the seam.
+- `fcontent -o paths -> fmap` is strong when literal evidence is the cleanest narrowing signal.
+- `fsearch -> fcontent -o paths -> fmap` is a real narrowing pattern, not an anti-pattern.
+- `fmap` is not just a producer before `fread`; it is the bridge in the middle of the pipeline.
+- `fmap + fread` is the power pair for understanding code.
+- `fedit` comes after inspected context, not before.
+- `fmetrics` is for observability and next-pass planning, not a reason to spam `ftree`.
+
+### Tool-Native Reasoning
+
+The mindset shift is simple: literal search is a strength here, not a fallback. If the exact token, phrase, or signature in front of you is the best narrowing handle, use it directly. The goal is not to imitate the habits agents learned from weaker default tools. The goal is to use the strongest local contract available.
+
+---
+
 ## fsuite Help
 
 `fsuite` is now a real suite-level guide command. The operational work still happens through the seven underlying tools, but `fsuite` is the fastest way to load the mental model.
@@ -176,6 +199,16 @@ The CLI equivalent is:
 ```bash
 fsuite
 ```
+
+### First-Contact Guidance
+
+- Composable sensor suite, not a single sacred path
+- Stronger and weaker combinations exist, but not one true sequence
+- Use `-o json` and `-o paths` aggressively
+- Treat `fmap` as the bridge in the middle of the pipeline
+- Treat literal search as a first-class narrowing move
+- Use `fedit` only after inspected context
+- Use `fmetrics` for observability, not as a reason to repeat recon
 
 ### What Each Tool Is For
 
@@ -198,7 +231,7 @@ fsuite
 - `-q` is for existence checks and silent control flow.
 - Use `fsuite` for the suite-level mental model and each tool's `--help` for the full flag breakdown.
 
-### Default Agent Workflow
+### Strong Default Flow
 
 ```bash
 # 0) Load the suite-level guide once
@@ -227,6 +260,25 @@ fedit -o json /project/src/auth.py --symbol authenticate --replace "return False
 fmetrics import
 fmetrics stats -o json
 fmetrics predict /project
+```
+
+This is a strong default, not a sacred sequence. When exact text is the cleanest narrowing signal, use `fcontent` directly. When you already have a narrowed path set, prefer `-o paths` and keep the next step cheap.
+
+### Strong Combination Patterns
+
+```bash
+# Path narrowing to structure
+fsearch -o paths '*.py' /project/src | fmap -o json
+
+# Literal narrowing to structure
+fcontent -o paths "authenticate" /project/src | fmap -o json
+
+# Path narrowing, then literal confirmation, then structure
+fsearch -o paths '*.py' /project/src | fcontent -o paths "authenticate" | fmap -o json
+
+# Structure + bounded reading
+fsearch -o paths '*.py' /project/src | fmap -o json
+fread -o json /project/src/auth.py --around "def authenticate" -B 5 -A 20
 ```
 
 ### Decision Rule for Agents
@@ -415,7 +467,7 @@ fcontent [OPTIONS] <query> [path]
 - Quiet mode (`-q`) for existence checks — exit 0 if found, 1 if not
 - Pass-through for extra `rg` flags via `--rg-args`
 
-**Operational note:** use `fcontent` after narrowing with `fsearch`/`fmap`/`fread`. It is an exact-text confirmation tool, not the best first-pass repo exploration step.
+**Operational note:** use `fcontent` after narrowing with `fsearch`/`fmap`/`fread`, but do not treat literal search as a fallback. Within a narrowed scope, exact text is often the cleanest and fastest route to the next structural step. `fcontent -o paths` is especially useful when the next move is `fmap`.
 
 **Examples:**
 
@@ -425,6 +477,9 @@ fcontent "database" /home/user/project
 
 # Pipe from fsearch
 fsearch --output paths '*.log' /var/log | fcontent "CRITICAL"
+
+# Narrow by exact text, then bridge into structure
+fsearch --output paths '*.py' /project/src | fcontent --output paths "authenticate" | fmap -o json
 
 # JSON output for agent consumption
 fcontent --output json "api_key" /home/user/project
