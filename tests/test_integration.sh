@@ -8,6 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FSEARCH="${SCRIPT_DIR}/../fsearch"
 FCONTENT="${SCRIPT_DIR}/../fcontent"
 FTREE="${SCRIPT_DIR}/../ftree"
+FCASE="${SCRIPT_DIR}/../fcase"
 TEST_DIR=""
 TESTS_RUN=0
 TESTS_PASSED=0
@@ -433,11 +434,23 @@ test_complete_agent_workflow() {
   local content
   content=$("${FSEARCH}" --output paths "*.py" "${TEST_DIR}" | "${FCONTENT}" --output json "TODO" 2>&1)
 
+  local case_home
+  case_home="$(mktemp -d)"
+
+  # Step 5: Preserve investigation continuity
+  HOME="${case_home}" FSUITE_TELEMETRY=0 "${FCASE}" init agent-workflow --goal "Track TODO seam" >/dev/null 2>&1
+  HOME="${case_home}" FSUITE_TELEMETRY=0 "${FCASE}" next agent-workflow --body "Inspect mapped TODO candidates" >/dev/null 2>&1
+  local handoff
+  handoff=$(HOME="${case_home}" FSUITE_TELEMETRY=0 "${FCASE}" handoff agent-workflow -o json 2>&1)
+  rm -rf "${case_home}"
+
   if [[ "$recon" =~ \"mode\":\"recon\" ]] && \
      [[ "$structure" =~ \"mode\":\"tree\" ]] && \
      [[ "$files" =~ \"tool\":\"fsearch\" ]] && \
-     [[ "$content" =~ \"tool\":\"fcontent\" ]]; then
-    pass "Complete agent workflow: recon → tree → fsearch → fcontent"
+     [[ "$content" =~ \"tool\":\"fcontent\" ]] && \
+     [[ "$handoff" == *'"slug":"agent-workflow"'* ]] && \
+     [[ "$handoff" == *'"next_move":"Inspect mapped TODO candidates"'* ]]; then
+    pass "Complete agent workflow: recon → tree → fsearch → fcontent → fcase"
   else
     fail "Complete workflow should produce valid JSON at each stage"
   fi

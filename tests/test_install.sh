@@ -67,6 +67,7 @@ test_prefix_install_copies_tools_and_assets() {
     "${prefix}/bin/fcontent" \
     "${prefix}/bin/fmap" \
     "${prefix}/bin/fread" \
+    "${prefix}/bin/fcase" \
     "${prefix}/bin/fedit" \
     "${prefix}/bin/fmetrics" \
     "${prefix}/share/fsuite/_fsuite_common.sh" \
@@ -96,6 +97,7 @@ test_prefix_install_versions_work() {
     FSUITE_TELEMETRY=0 "${prefix}/bin/fcontent" --version
     FSUITE_TELEMETRY=0 "${prefix}/bin/fmap" --version
     FSUITE_TELEMETRY=0 "${prefix}/bin/fread" --version
+    FSUITE_TELEMETRY=0 "${prefix}/bin/fcase" --version
     FSUITE_TELEMETRY=0 "${prefix}/bin/fedit" --version
     FSUITE_TELEMETRY=0 "${prefix}/bin/fmetrics" --version
   )
@@ -106,6 +108,7 @@ test_prefix_install_versions_work() {
      [[ "$output" =~ fcontent\ [0-9]+\.[0-9]+\.[0-9]+ ]] && \
      [[ "$output" =~ fmap\ [0-9]+\.[0-9]+\.[0-9]+ ]] && \
      [[ "$output" =~ fread\ [0-9]+\.[0-9]+\.[0-9]+ ]] && \
+     [[ "$output" =~ fcase\ [0-9]+\.[0-9]+\.[0-9]+ ]] && \
      [[ "$output" =~ fedit\ [0-9]+\.[0-9]+\.[0-9]+ ]] && \
      [[ "$output" =~ fmetrics\ [0-9]+\.[0-9]+\.[0-9]+ ]]; then
     pass "Installed tools report versions from the prefix"
@@ -125,9 +128,10 @@ test_fsuite_help_explains_flow() {
   output=$(FSUITE_TELEMETRY=0 "${prefix}/bin/fsuite" 2>&1)
 
   if [[ "$output" == *"Canonical agent flow"* ]] && \
-     [[ "$output" == *"ftree -> fsearch | fcontent -> fmap -> fread -> fedit -> fmetrics"* ]] && \
+     [[ "$output" == *"ftree -> fsearch | fcontent -> fmap -> fread -> fcase -> fedit -> fmetrics"* ]] && \
      [[ "$output" == *"Composable sensor suite"* ]] && \
-     [[ "$output" == *"Literal search is a strength here, not a fallback."* ]]; then
+     [[ "$output" == *"Literal search is a strength here, not a fallback."* ]] && \
+     [[ "$output" == *"fcase     Preserve investigation state and hand off cleanly"* ]]; then
     pass "fsuite command explains the suite flow"
   else
     fail "fsuite command should explain the suite workflow" "Got: $output"

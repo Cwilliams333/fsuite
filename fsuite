@@ -20,8 +20,8 @@ USAGE
   fsuite usage
 
 DESCRIPTION
-  fsuite is the suite-level guide for the seven operational tools:
-    ftree, fsearch, fcontent, fmap, fread, fedit, fmetrics
+  fsuite is the suite-level guide for the eight operational tools:
+    ftree, fsearch, fcontent, fmap, fread, fcase, fedit, fmetrics
 
   Use fsuite when you want the conceptual flow, tool roles, and headless
   operating pattern without digging through the README first.
@@ -36,20 +36,21 @@ print_help() {
   cat <<EOF
 fsuite ${VERSION}
 
-Seven operational tools. One composable sensor suite.
+Eight operational tools. One composable sensor suite.
 
   ftree     Scout the project once
   fsearch   Find candidate files
   fcontent  Confirm exact text across the narrowed set
   fmap      Map symbols and structure
   fread     Read the exact seam you care about
+  fcase     Preserve investigation state and hand off cleanly
   fedit     Preview and apply surgical patches
   fmetrics  Measure what happened and predict the next run
 
 Canonical agent flow
 
-  ftree -> fsearch | fcontent -> fmap -> fread -> fedit -> fmetrics
-  Scout    Narrowing             Bridge   Read     Change    Measure
+  ftree -> fsearch | fcontent -> fmap -> fread -> fcase -> fedit -> fmetrics
+  Scout    Narrowing             Bridge   Read     Preserve  Change    Measure
 
 First-contact mindset
 
@@ -60,6 +61,7 @@ First-contact mindset
   - Use -o json and -o paths aggressively.
   - Treat fmap as the bridge in the middle, not only a producer before fread.
   - fmap + fread is the power pair for understanding code.
+  - fcase preserves the seam once you know what matters.
   - Use ftree intentionally and sparingly on large repos.
   - Use fedit only after inspected context.
   - Use fmetrics for observability, not as a reason to spam ftree.
@@ -110,6 +112,9 @@ Tool roles
   fread
     Bounded reads around lines, patterns, symbols, and diffs.
 
+  fcase
+    Structured continuity for cases, evidence, hypotheses, and handoffs.
+
   fedit
     Surgical patching with dry-run diffs, symbol shortcuts, preconditions, and batch mode.
 
@@ -137,10 +142,13 @@ Recommended workflow
   5. fread
      Pair with fmap to read the exact seam now that the target is clear.
 
-  6. fedit
+  6. fcase
+     Preserve the current case state once the seam, evidence, and next move are known.
+
+  7. fedit
      Preview and apply a surgical change only after inspected context.
 
-  7. fmetrics
+  8. fmetrics
      Measure runtime history and import telemetry if needed.
 
 Strong combinations:
@@ -148,6 +156,7 @@ Strong combinations:
   - fcontent -o paths -> fmap
   - fsearch -> fcontent -o paths -> fmap
   - fmap + fread
+  - fmap + fread + fcase
 
 Mindset:
   - heuristic, not rigid rule
@@ -155,7 +164,7 @@ Mindset:
   - use -o json and -o paths aggressively
 
 Heuristic, not rigid rule:
-  ftree -> fsearch | fcontent -> fmap -> fread -> fedit -> fmetrics
+  ftree -> fsearch | fcontent -> fmap -> fread -> fcase -> fedit -> fmetrics
 EOF
 }
 
@@ -177,6 +186,11 @@ Examples
 
   # fmap + fread is the power pair for understanding code
   fread -o json /project/src/auth.py --around "def authenticate" -B 5 -A 20
+
+  # Preserve continuity before editing or handing off
+  fcase init auth-seam --goal "Trace authenticate flow"
+  fcase evidence auth-seam --tool fread --path /project/src/auth.py --lines 40:72 --summary "Authenticate branch" --body "..."
+  fcase next auth-seam --body "Patch denial branch after reviewing symbol map"
 
   # Preview and apply a patch
   fedit -o json /project/src/auth.py --symbol authenticate --replace "return False" --with "return deny()"

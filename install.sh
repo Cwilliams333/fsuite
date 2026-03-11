@@ -11,7 +11,7 @@ MODE="source"
 PACKAGE_PATH=""
 VERIFY=1
 
-TOOLS=(fsuite ftree fsearch fcontent fmap fread fedit fmetrics)
+TOOLS=(fsuite ftree fsearch fcontent fmap fread fcase fedit fmetrics)
 SHARE_FILES=(_fsuite_common.sh fmetrics-predict.py)
 
 die() {
