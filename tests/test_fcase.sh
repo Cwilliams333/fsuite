@@ -121,6 +121,55 @@ test_init_rejects_duplicate_slug() {
   fi
 }
 
+test_next_updates_current_state() {
+  run_fcase init next-bug --goal "Track next move" >/dev/null 2>&1 || true
+  run_fcase next next-bug --body "Inspect refresh-token branch in auth.py" >/dev/null 2>&1 || true
+  local output rc=0
+  output=$(run_fcase status next-bug -o json 2>&1) || rc=$?
+  if [[ $rc -eq 0 ]] && [[ "$output" == *'"next_move":"Inspect refresh-token branch in auth.py"'* ]]; then
+    pass "next updates current case state"
+  else
+    fail "next should update current case state" "rc=$rc output=$output"
+  fi
+}
+
+test_note_records_recent_event() {
+  run_fcase init note-bug --goal "Track note event" >/dev/null 2>&1 || true
+  run_fcase note note-bug --body "Auth failure reproduces only on refresh path" >/dev/null 2>&1 || true
+  local output rc=0
+  output=$(run_fcase status note-bug -o json 2>&1) || rc=$?
+  if [[ $rc -eq 0 ]] && [[ "$output" == *'"event_type":"note"'* ]] && [[ "$output" == *'refresh path'* ]]; then
+    pass "note records a recent event"
+  else
+    fail "note should append an event" "rc=$rc output=$output"
+  fi
+}
+
+test_handoff_includes_current_state_and_recent_events() {
+  run_fcase init handoff-bug --goal "Prepare handoff" >/dev/null 2>&1 || true
+  run_fcase note handoff-bug --body "Auth failure reproduces only on refresh path" >/dev/null 2>&1 || true
+  run_fcase next handoff-bug --body "Inspect refresh-token branch in auth.py" >/dev/null 2>&1 || true
+  local output rc=0
+  output=$(run_fcase handoff handoff-bug -o json 2>&1) || rc=$?
+  if [[ $rc -eq 0 ]] && [[ "$output" == *'"next_move":"Inspect refresh-token branch in auth.py"'* ]] && [[ "$output" == *'"event_type":"note"'* ]]; then
+    pass "handoff includes current state and recent events"
+  else
+    fail "handoff should summarize current case state" "rc=$rc output=$output"
+  fi
+}
+
+test_export_emits_full_case_envelope() {
+  run_fcase init export-bug --goal "Export full case envelope" >/dev/null 2>&1 || true
+  run_fcase note export-bug --body "Export note body" >/dev/null 2>&1 || true
+  local output rc=0
+  output=$(run_fcase export export-bug -o json 2>&1) || rc=$?
+  if [[ $rc -eq 0 ]] && python3 -c 'import json,sys; data=json.loads(sys.stdin.read()); assert data["case"]["slug"] == "export-bug"; assert isinstance(data["sessions"], list); assert isinstance(data["events"], list); assert len(data["events"]) >= 2' <<< "$output" 2>/dev/null; then
+    pass "export emits full case envelope"
+  else
+    fail "export should emit full case envelope" "rc=$rc output=$output"
+  fi
+}
+
 main() {
   echo "======================================"
   echo "  fcase Test Suite"
@@ -139,6 +188,10 @@ main() {
   run_test test_init_bootstraps_database
   run_test test_status_shows_core_case_state
   run_test test_init_rejects_duplicate_slug
+  run_test test_next_updates_current_state
+  run_test test_note_records_recent_event
+  run_test test_handoff_includes_current_state_and_recent_events
+  run_test test_export_emits_full_case_envelope
 
   echo ""
   echo "======================================"

@@ -140,6 +140,20 @@ case_id_for_slug() {
   sqlite3 "$DB_FILE" "SELECT id FROM cases WHERE slug = $(sql_quote "$slug");"
 }
 
+latest_session_id_for_case() {
+  local case_id="$1"
+  sqlite3 "$DB_FILE" "SELECT id FROM case_sessions WHERE case_id = $case_id ORDER BY id DESC LIMIT 1;"
+}
+
+append_event() {
+  local case_id="$1"
+  local session_id="$2"
+  local event_type="$3"
+  local payload_json="$4"
+  local created_at="$5"
+  sqlite3 "$DB_FILE" "INSERT INTO events (case_id, session_id, event_type, payload_json, created_at) VALUES ($case_id, ${session_id:-NULL}, $(sql_quote "$event_type"), $(sql_quote "$payload_json"), $(sql_quote "$created_at"));"
+}
+
 status_json() {
   local slug="$1"
   sqlite3 "$DB_FILE" <<SQL
@@ -234,6 +248,196 @@ SELECT json_object(
       WHERE case_id = (SELECT id FROM target_case)
       ORDER BY id DESC
       LIMIT 10
+    )
+  ), json('[]'))
+);
+SQL
+}
+
+handoff_json() {
+  local slug="$1"
+  sqlite3 "$DB_FILE" <<SQL
+WITH target_case AS (
+  SELECT id, slug, goal, status, priority, next_move, created_at, updated_at
+  FROM cases
+  WHERE slug = $(sql_quote "$slug")
+)
+SELECT json_object(
+  'case', (
+    SELECT json_object(
+      'id', id,
+      'slug', slug,
+      'goal', goal,
+      'status', status,
+      'priority', priority,
+      'next_move', next_move,
+      'created_at', created_at,
+      'updated_at', updated_at
+    ) FROM target_case
+  ),
+  'active_session', (
+    SELECT json_object(
+      'id', id,
+      'actor', actor,
+      'started_at', started_at,
+      'ended_at', ended_at,
+      'summary', summary
+    )
+    FROM case_sessions
+    WHERE case_id = (SELECT id FROM target_case)
+    ORDER BY id DESC
+    LIMIT 1
+  ),
+  'targets', COALESCE((
+    SELECT json_group_array(json_object(
+      'id', id,
+      'path', path,
+      'symbol', symbol,
+      'symbol_type', symbol_type,
+      'rank', rank,
+      'reason', reason,
+      'state', state
+    ))
+    FROM targets
+    WHERE case_id = (SELECT id FROM target_case)
+  ), json('[]')),
+  'hypotheses', COALESCE((
+    SELECT json_group_array(json_object(
+      'id', id,
+      'body', body,
+      'status', status,
+      'confidence', confidence,
+      'reason', reason
+    ))
+    FROM hypotheses
+    WHERE case_id = (SELECT id FROM target_case)
+  ), json('[]')),
+  'recent_events', COALESCE((
+    SELECT json_group_array(json_object(
+      'id', id,
+      'event_type', event_type,
+      'payload_json', payload_json,
+      'created_at', created_at
+    ))
+    FROM (
+      SELECT id, event_type, payload_json, created_at
+      FROM events
+      WHERE case_id = (SELECT id FROM target_case)
+      ORDER BY id DESC
+      LIMIT 10
+    )
+  ), json('[]'))
+);
+SQL
+}
+
+export_json() {
+  local slug="$1"
+  sqlite3 "$DB_FILE" <<SQL
+WITH target_case AS (
+  SELECT id, slug, goal, status, priority, next_move, created_at, updated_at
+  FROM cases
+  WHERE slug = $(sql_quote "$slug")
+)
+SELECT json_object(
+  'case', (
+    SELECT json_object(
+      'id', id,
+      'slug', slug,
+      'goal', goal,
+      'status', status,
+      'priority', priority,
+      'next_move', next_move,
+      'created_at', created_at,
+      'updated_at', updated_at
+    ) FROM target_case
+  ),
+  'sessions', COALESCE((
+    SELECT json_group_array(json_object(
+      'id', id,
+      'started_at', started_at,
+      'ended_at', ended_at,
+      'actor', actor,
+      'summary', summary
+    ))
+    FROM (
+      SELECT id, started_at, ended_at, actor, summary
+      FROM case_sessions
+      WHERE case_id = (SELECT id FROM target_case)
+      ORDER BY id ASC
+    )
+  ), json('[]')),
+  'targets', COALESCE((
+    SELECT json_group_array(json_object(
+      'id', id,
+      'path', path,
+      'symbol', symbol,
+      'symbol_type', symbol_type,
+      'rank', rank,
+      'reason', reason,
+      'state', state,
+      'created_at', created_at,
+      'updated_at', updated_at
+    ))
+    FROM (
+      SELECT *
+      FROM targets
+      WHERE case_id = (SELECT id FROM target_case)
+      ORDER BY id ASC
+    )
+  ), json('[]')),
+  'evidence', COALESCE((
+    SELECT json_group_array(json_object(
+      'id', id,
+      'tool', tool,
+      'path', path,
+      'symbol', symbol,
+      'line_start', line_start,
+      'line_end', line_end,
+      'match_line', match_line,
+      'summary', summary,
+      'body', body,
+      'payload_json', payload_json,
+      'fingerprint', fingerprint,
+      'created_at', created_at
+    ))
+    FROM (
+      SELECT *
+      FROM evidence
+      WHERE case_id = (SELECT id FROM target_case)
+      ORDER BY id ASC
+    )
+  ), json('[]')),
+  'hypotheses', COALESCE((
+    SELECT json_group_array(json_object(
+      'id', id,
+      'body', body,
+      'status', status,
+      'confidence', confidence,
+      'reason', reason,
+      'created_at', created_at,
+      'updated_at', updated_at
+    ))
+    FROM (
+      SELECT *
+      FROM hypotheses
+      WHERE case_id = (SELECT id FROM target_case)
+      ORDER BY id ASC
+    )
+  ), json('[]')),
+  'events', COALESCE((
+    SELECT json_group_array(json_object(
+      'id', id,
+      'session_id', session_id,
+      'event_type', event_type,
+      'payload_json', payload_json,
+      'created_at', created_at
+    ))
+    FROM (
+      SELECT *
+      FROM events
+      WHERE case_id = (SELECT id FROM target_case)
+      ORDER BY id ASC
     )
   ), json('[]'))
 );
@@ -439,6 +643,133 @@ cmd_status() {
   fi
 }
 
+cmd_note() {
+  local slug="${1:-}"
+  shift || true
+  [[ -n "$slug" ]] || die "note requires <slug>"
+
+  local body=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --body)
+        body="${2:-}"
+        shift 2
+        ;;
+      *)
+        die "Unknown option for note: $1"
+        ;;
+    esac
+  done
+  [[ -n "$body" ]] || die "note requires --body"
+
+  ensure_db
+  local case_id session_id now payload
+  case_id="$(case_id_for_slug "$slug")"
+  [[ -n "$case_id" ]] || die "case not found: $slug"
+  session_id="$(latest_session_id_for_case "$case_id")"
+  now="$(now_utc)"
+  payload="$(printf '{"body":"%s"}' "$(printf '%s' "$body" | json_escape)")"
+  append_event "$case_id" "$session_id" "note" "$payload" "$now"
+  sqlite3 "$DB_FILE" "UPDATE cases SET updated_at = $(sql_quote "$now") WHERE id = $case_id;"
+  echo "Added note to ${slug}"
+}
+
+cmd_next() {
+  local slug="${1:-}"
+  shift || true
+  [[ -n "$slug" ]] || die "next requires <slug>"
+
+  local body="" output="$DEFAULT_OUTPUT"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --body)
+        body="${2:-}"
+        shift 2
+        ;;
+      -o|--output)
+        output="${2:-}"
+        shift 2
+        ;;
+      *)
+        die "Unknown option for next: $1"
+        ;;
+    esac
+  done
+  [[ -n "$body" ]] || die "next requires --body"
+  [[ "$output" == "pretty" || "$output" == "json" ]] || die "Invalid --output: $output"
+
+  ensure_db
+  local case_id session_id now payload
+  case_id="$(case_id_for_slug "$slug")"
+  [[ -n "$case_id" ]] || die "case not found: $slug"
+  session_id="$(latest_session_id_for_case "$case_id")"
+  now="$(now_utc)"
+  sqlite3 "$DB_FILE" "UPDATE cases SET next_move = $(sql_quote "$body"), updated_at = $(sql_quote "$now") WHERE id = $case_id;"
+  payload="$(printf '{"next_move":"%s"}' "$(printf '%s' "$body" | json_escape)")"
+  append_event "$case_id" "$session_id" "next_move_set" "$payload" "$now"
+  if [[ "$output" == "json" ]]; then
+    status_json "$slug"
+  else
+    echo "Updated next move for ${slug}"
+    echo "Next: ${body}"
+  fi
+}
+
+cmd_handoff() {
+  local slug="${1:-}"
+  shift || true
+  [[ -n "$slug" ]] || die "handoff requires <slug>"
+  local output="$DEFAULT_OUTPUT"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -o|--output)
+        output="${2:-}"
+        shift 2
+        ;;
+      *)
+        die "Unknown option for handoff: $1"
+        ;;
+    esac
+  done
+  [[ "$output" == "pretty" || "$output" == "json" ]] || die "Invalid --output: $output"
+
+  ensure_db
+  local case_id
+  case_id="$(case_id_for_slug "$slug")"
+  [[ -n "$case_id" ]] || die "case not found: $slug"
+
+  if [[ "$output" == "json" ]]; then
+    handoff_json "$slug"
+  else
+    cmd_status "$slug" --output pretty
+  fi
+}
+
+cmd_export() {
+  local slug="${1:-}"
+  shift || true
+  [[ -n "$slug" ]] || die "export requires <slug>"
+  local output="$DEFAULT_OUTPUT"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -o|--output)
+        output="${2:-}"
+        shift 2
+        ;;
+      *)
+        die "Unknown option for export: $1"
+        ;;
+    esac
+  done
+  [[ "$output" == "json" ]] || die "export currently supports only -o json"
+
+  ensure_db
+  local case_id
+  case_id="$(case_id_for_slug "$slug")"
+  [[ -n "$case_id" ]] || die "case not found: $slug"
+  export_json "$slug"
+}
+
 main() {
   local cmd="${1:---help}"
   case "$cmd" in
@@ -459,6 +790,22 @@ main() {
     status)
       shift
       cmd_status "$@"
+      ;;
+    note)
+      shift
+      cmd_note "$@"
+      ;;
+    next)
+      shift
+      cmd_next "$@"
+      ;;
+    handoff)
+      shift
+      cmd_handoff "$@"
+      ;;
+    export)
+      shift
+      cmd_export "$@"
       ;;
     *)
       die 2 "unknown or unimplemented subcommand: $cmd"
