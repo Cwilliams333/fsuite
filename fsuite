@@ -90,6 +90,36 @@ Examples
   fmetrics import && fmetrics stats -o json
 
 Use each tool's --help for the full flag surface.
+
+  Cheatsheet aliases
+
+    # fsuite cheatsheet aliases — pretty output, human god mode
+    alias ft='ftree'                          # tree from here (depth 3)
+    alias ft5='ftree -L 5'                    # deeper dive (depth 5)
+    alias ftr='ftree --recon'                 # recon: sizes + counts per dir
+    alias ftr5='ftree --recon -L 5'           # deep recon
+    alias fta='ftree --no-default-ignore'     # show everything (node_modules, .git, etc)
+
+    alias fs='fsearch'                        # fs "pattern" [path]
+    alias fse='fsearch'                       # fs by extension: fse log ~/logs
+    alias fsi='fsearch -i'                    # interactive mode
+
+    alias fc='fcontent'                       # fc "needle" [path]
+    alias fci='fcontent --rg-args "-i"'       # case-insensitive search
+    alias fcf='fcontent --rg-args "-F"'       # fixed string (literal, no regex)
+    alias fcp='fcontent -o paths'             # just file paths that match
+    alias fcj='fcontent -o json'              # json output for piping
+    alias fsa='fsearch --output paths'          # fs + paths only
+    alias fca='fcontent --output paths'        # fc + paths only
+
+    alias fsc='_fsc'                          # fsc "ext" "needle" [path]
+
+    alias fmp='fmap'                           # fmp src/ — map code structure
+    alias fmpj='fmap -o json'                 # json output for scripting
+    alias fmps='fmap -m 500'                  # deep scan (500 symbol cap)
+
+    alias fm='fmetrics'
+    alias fms='fmetrics --self-check'
 EOF
 }
 
