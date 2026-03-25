@@ -755,11 +755,13 @@ extract_symbols() {
       )
       ;;
     markdown)
+      # ATX headings: allow 0-3 leading spaces, optional trailing #
       patterns=(
-        "class:^#{1,2}[[:space:]]"
-        "function:^#{3,6}[[:space:]]"
-        "import:^\[.*\]\(https?://[^)]+\)"
-        "constant:^\`\`\`[a-zA-Z]"
+        "class:^[[:space:]]{0,3}#{1,2}[[:space:]]"
+        "function:^[[:space:]]{0,3}#{3,6}[[:space:]]"
+        "import:^\[.*\]\([^)]+\)"
+        "constant:^[[:space:]]{0,3}\`\`\`"
+        "constant:^[[:space:]]{0,3}~~~"
       )
       ;;
   esac
@@ -793,6 +795,80 @@ extract_symbols() {
       printf '%s\t%s\t%s\t%s\n' "$lineno" "$sym_type" "$indent" "$text" >> "$_tmp_raw"
     done < <(grep -n -E -I "$regex" -- "$file" 2>/dev/null || true)
   done
+  # --- Markdown: suppress symbols inside fenced code blocks and frontmatter ---
+  if [[ "$lang" == "markdown" ]] && [[ -s "$_tmp_raw" ]]; then
+    local _tmp_filtered
+    _tmp_filtered="$(mktemp)"
+
+    # Build suppressed-line ranges using awk on the original file,
+    # then filter the raw symbols against those ranges.
+    # Also detect setext headings (line above === or --- underline).
+    awk -v raw_file="$_tmp_raw" -v filtered_file="$_tmp_filtered" '
+    BEGIN {
+      in_fence = 0; in_frontmatter = 0; fence_char = ""
+      n_suppress = 0; n_setext = 0
+    }
+    # Frontmatter: --- at line 1 opens, next --- closes
+    NR == 1 && /^---[[:space:]]*$/ { in_frontmatter = 1; next }
+    in_frontmatter && /^---[[:space:]]*$/ { in_frontmatter = 0; next }
+    in_frontmatter { suppress[NR] = 1; n_suppress++; next }
+
+    # Fenced code blocks: ``` or ~~~ (with 0-3 leading spaces)
+    /^[[:space:]]{0,3}```/ || /^[[:space:]]{0,3}~~~/ {
+      if (!in_fence) {
+        in_fence = 1
+        # Determine fence char for matching close
+        if (match($0, /~~~/) > 0) fence_char = "~~~"
+        else fence_char = "```"
+        # The fence-open line itself is NOT suppressed (shows as constant)
+        next
+      } else {
+        # Check if this line closes the current fence
+        if ((fence_char == "```" && match($0, /^[[:space:]]{0,3}```/) > 0) ||
+            (fence_char == "~~~" && match($0, /^[[:space:]]{0,3}~~~/) > 0)) {
+          in_fence = 0; fence_char = ""
+          # Fence-close line is suppressed (not structural)
+          suppress[NR] = 1; n_suppress++
+          next
+        }
+      }
+    }
+    in_fence { suppress[NR] = 1; n_suppress++; next }
+
+    # Setext headings: current line is ===+ or ---+ (not in fence),
+    # and previous line was non-empty text
+    /^[[:space:]]{0,3}=+[[:space:]]*$/ && prev_text != "" && !in_fence {
+      setext_lines[n_setext] = (NR - 1) "\tclass\t0\t" prev_text
+      n_setext++
+      next
+    }
+    /^[[:space:]]{0,3}-{2,}[[:space:]]*$/ && prev_text != "" && !in_fence {
+      setext_lines[n_setext] = (NR - 1) "\tfunction\t0\t" prev_text
+      n_setext++
+      next
+    }
+    { prev_text = $0 }
+    END {
+      # Filter raw symbols: remove suppressed lines
+      while ((getline line < raw_file) > 0) {
+        split(line, parts, "\t")
+        lineno = parts[1] + 0
+        if (!(lineno in suppress)) {
+          print line >> filtered_file
+        }
+      }
+      close(raw_file)
+      # Append setext headings
+      for (i = 0; i < n_setext; i++) {
+        print setext_lines[i] >> filtered_file
+      }
+      close(filtered_file)
+    }
+    ' "$file"
+
+    mv "$_tmp_filtered" "$_tmp_raw"
+  fi
+
   # Deduplicate: sort by line number, keep first occurrence per line
   if [[ -s "$_tmp_raw" ]]; then
     sort -t$'\t' -k1,1n -s "$_tmp_raw" | awk -F'\t' '!seen[$1]++'
@@ -809,9 +885,13 @@ extract_symbol_name() {
 
   case "$sym_type" in
     function)
-      # Markdown headings: "### Subsection" → "Subsection"
+      # Markdown headings: "### Subsection ###" → "Subsection"
       if [[ "$trimmed" =~ ^(#{1,6})[[:space:]]+(.*) ]]; then
-        printf '%s\n' "${BASH_REMATCH[2]}"
+        local _md_title="${BASH_REMATCH[2]}"
+        # Strip optional trailing # and whitespace (CommonMark ATX)
+        _md_title="${_md_title%%+([[:space:]])+(#)}"
+        _md_title="${_md_title%"${_md_title##*[![:space:]]}"}"
+        printf '%s\n' "$_md_title"
         return 0
       fi
       if [[ "$trimmed" =~ (^|[[:space:]])def[[:space:]]+([_[:alpha:]][_[:alnum:]]*) ]]; then
@@ -852,9 +932,12 @@ extract_symbol_name() {
       fi
       ;;
     class)
-      # Markdown headings: "## Title" → "Title"
+      # Markdown headings: "## Title ##" → "Title"
       if [[ "$trimmed" =~ ^(#{1,6})[[:space:]]+(.*) ]]; then
-        printf '%s\n' "${BASH_REMATCH[2]}"
+        local _md_title="${BASH_REMATCH[2]}"
+        _md_title="${_md_title%%+([[:space:]])+(#)}"
+        _md_title="${_md_title%"${_md_title##*[![:space:]]}"}"
+        printf '%s\n' "$_md_title"
         return 0
       fi
       if [[ "$trimmed" =~ ^\<([A-Za-z_][A-Za-z0-9_.-]*) ]]; then
