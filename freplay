@@ -171,11 +171,453 @@ cmd_self_check() {
 }
 
 # ---------------------------------------------------------------------------
-# Stub commands (not yet implemented)
+# Helper: is_fsuite_tool — recognizes all fsuite tools by basename
+# ---------------------------------------------------------------------------
+
+is_fsuite_tool() {
+  local tool_basename="$1"
+  case "$tool_basename" in
+    ftree|fsearch|fcontent|fmap|fread|fcase|fedit|fsuite|fmetrics|freplay) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
+# Helper: is_denied_tool — checks if tool is in RECORDING_DENYLIST
+# ---------------------------------------------------------------------------
+
+is_denied_tool() {
+  local tool_basename="$1"
+  local denied
+  for denied in "${RECORDING_DENYLIST[@]}"; do
+    [[ "$tool_basename" == "$denied" ]] && return 0
+  done
+  return 1
+}
+
+# ---------------------------------------------------------------------------
+# Helper: derive_mode — returns read_only / mutating / unknown
+# ---------------------------------------------------------------------------
+
+derive_mode() {
+  local tool="$1"
+  shift
+  local -a args=("$@")
+
+  case "$tool" in
+    fedit)
+      local arg
+      for arg in "${args[@]+"${args[@]}"}"; do
+        [[ "$arg" == "--apply" ]] && { echo "mutating"; return; }
+      done
+      echo "read_only"
+      return
+      ;;
+    fcase)
+      # Extract subcommand: first non-flag arg
+      local arg subcmd=""
+      for arg in "${args[@]+"${args[@]}"}"; do
+        if [[ "$arg" != -* ]]; then
+          subcmd="$arg"
+          break
+        fi
+      done
+      if [[ -n "$subcmd" && -n "${FCASE_SUBCOMMAND_MODE[$subcmd]+_}" ]]; then
+        echo "${FCASE_SUBCOMMAND_MODE[$subcmd]}"
+      else
+        echo "unknown"
+      fi
+      return
+      ;;
+    *)
+      if [[ -n "${TOOL_MODE_DEFAULT[$tool]+_}" ]]; then
+        echo "${TOOL_MODE_DEFAULT[$tool]}"
+      else
+        echo "unknown"
+      fi
+      return
+      ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
+# Helper: get_or_create_draft_replay — returns replay_id
+# ---------------------------------------------------------------------------
+
+get_or_create_draft_replay() {
+  local case_id="$1"
+  local draft_count draft_id now
+
+  draft_count="$(db_query <<<"SELECT COUNT(*) FROM replays WHERE case_id=$case_id AND status='draft';")"
+
+  if (( draft_count == 0 )); then
+    now="$(now_utc)"
+    db_exec <<SQL
+INSERT INTO replays (case_id, status, origin, fsuite_version, actor, created_at, updated_at)
+  VALUES ($case_id, 'draft', 'recorded', $(sql_quote "$VERSION"), $(sql_quote "$(whoami)"), $(sql_quote "$now"), $(sql_quote "$now"));
+SQL
+    draft_id="$(db_query <<<"SELECT id FROM replays WHERE case_id=$case_id AND status='draft' ORDER BY id DESC LIMIT 1;")"
+    echo "$draft_id"
+  elif (( draft_count == 1 )); then
+    draft_id="$(db_query <<<"SELECT id FROM replays WHERE case_id=$case_id AND status='draft' LIMIT 1;")"
+    echo "$draft_id"
+  else
+    die "multiple draft replays exist for this case; use --replay-id N or --new to disambiguate"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Helper: extract_result_summary — tool-aware summary from stdout
+# ---------------------------------------------------------------------------
+
+extract_result_summary() {
+  local tool="$1"
+  local stdout_file="$2"
+
+  # Only call for read_only mode; caller ensures this.
+  local summary
+  summary="$(python3 -c "
+import json, sys
+
+tool = sys.argv[1]
+try:
+    with open(sys.argv[2], 'r') as f:
+        raw = f.read()
+except Exception:
+    raw = ''
+
+# Try JSON parse
+data = None
+try:
+    data = json.loads(raw)
+except Exception:
+    pass
+
+result = None
+
+if tool == 'ftree':
+    if data and isinstance(data, dict):
+        snap = data.get('snapshot', '')
+        if snap:
+            result = 'snapshot: ' + snap[:200]
+        else:
+            dirs = len(data.get('directories', []))
+            files = len(data.get('files', []))
+            result = f'{dirs} dirs, {files} files'
+    elif 'snapshot:' in raw:
+        for line in raw.splitlines():
+            if 'snapshot:' in line:
+                result = line.strip()[:240]
+                break
+
+elif tool == 'fsearch':
+    if data and isinstance(data, dict):
+        matches = data.get('total_matches', data.get('match_count', '?'))
+        files = len(data.get('files', data.get('results', [])))
+        result = f'{matches} matches in {files} files'
+
+elif tool == 'fcontent':
+    if data and isinstance(data, dict):
+        matches = data.get('total_matches', data.get('match_count', '?'))
+        files = len(data.get('files', data.get('results', [])))
+        result = f'{matches} matches in {files} files'
+
+elif tool == 'fmap':
+    if data and isinstance(data, dict):
+        symbols = data.get('total_symbols', data.get('symbol_count', '?'))
+        files = len(data.get('files', data.get('results', [])))
+        result = f'{symbols} symbols in {files} files'
+
+elif tool == 'fread':
+    if data and isinstance(data, dict):
+        lines = data.get('line_count', data.get('total_lines', '?'))
+        path = data.get('path', data.get('file', ''))
+        result = f'{lines} lines from {path}'
+
+elif tool == 'fedit':
+    if raw:
+        if 'dry-run' in raw.lower() or 'dry run' in raw.lower():
+            result = 'dry-run: ' + raw.splitlines()[0][:200]
+        elif 'applied' in raw.lower():
+            result = 'applied: ' + raw.splitlines()[0][:200]
+
+elif tool == 'fcase':
+    pass  # subcommand-dependent, null is fine
+
+elif tool == 'fmetrics':
+    if data and isinstance(data, dict):
+        runs = data.get('total_runs', data.get('runs_imported', '?'))
+        result = f'{runs} runs imported'
+    elif raw:
+        for line in raw.splitlines():
+            if 'import' in line.lower():
+                result = line.strip()[:240]
+                break
+
+if result is None and raw:
+    result = raw[:240]
+
+if result is not None:
+    print(result[:240], end='')
+" "$tool" "$stdout_file" 2>/dev/null)" || true
+
+  echo "$summary"
+}
+
+# ---------------------------------------------------------------------------
+# cmd_record — run an fsuite command and record it as a replay step
 # ---------------------------------------------------------------------------
 
 cmd_record() {
-  die 2 "not yet implemented"
+  local slug="" purpose="" replay_id_flag="" force_new=0
+  local -a links=()
+  local -a cmd_args=()
+  local seen_separator=0
+
+  # Parse arguments
+  while (( $# > 0 )); do
+    if (( seen_separator )); then
+      cmd_args+=("$1")
+      shift
+      continue
+    fi
+    case "$1" in
+      --)
+        seen_separator=1
+        shift
+        ;;
+      --purpose)
+        [[ $# -ge 2 ]] || die 2 "--purpose requires a value"
+        purpose="$2"
+        shift 2
+        ;;
+      --purpose=*)
+        purpose="${1#--purpose=}"
+        shift
+        ;;
+      --link)
+        [[ $# -ge 2 ]] || die 2 "--link requires a value"
+        links+=("$2")
+        shift 2
+        ;;
+      --link=*)
+        links+=("${1#--link=}")
+        shift
+        ;;
+      --replay-id)
+        [[ $# -ge 2 ]] || die 2 "--replay-id requires a value"
+        replay_id_flag="$2"
+        shift 2
+        ;;
+      --replay-id=*)
+        replay_id_flag="${1#--replay-id=}"
+        shift
+        ;;
+      --new)
+        force_new=1
+        shift
+        ;;
+      -*)
+        die 2 "unknown option: $1"
+        ;;
+      *)
+        if [[ -z "$slug" ]]; then
+          slug="$1"
+        else
+          die 2 "unexpected argument: $1 (missing -- separator before command?)"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  # Validation
+  [[ -n "$slug" ]] || die 2 "case slug required"
+  (( seen_separator )) || die 2 "-- separator required before command"
+  (( ${#cmd_args[@]} > 0 )) || die 2 "command required after --"
+
+  # --replay-id and --new are mutually exclusive
+  if [[ -n "$replay_id_flag" ]] && (( force_new )); then
+    die 2 "--replay-id and --new are mutually exclusive"
+  fi
+
+  # Extract tool basename
+  local tool_path="${cmd_args[0]}"
+  local tool_basename
+  tool_basename="$(basename "$tool_path")"
+
+  # Tool validation: is it an fsuite tool?
+  if ! is_fsuite_tool "$tool_basename"; then
+    die 2 "'$tool_basename' is not an fsuite tool"
+  fi
+
+  # Tool validation: is it denied?
+  if is_denied_tool "$tool_basename"; then
+    die 2 "'$tool_basename' is excluded from recording"
+  fi
+
+  # Validate --link format
+  local lnk
+  for lnk in "${links[@]+"${links[@]}"}"; do
+    if [[ ! "$lnk" =~ ^(evidence|target|hypothesis):[0-9]+$ ]]; then
+      die 2 "invalid --link format: '$lnk' (expected type:numeric_id, e.g. evidence:42)"
+    fi
+  done
+
+  # DB setup and case lookup
+  ensure_db
+  local case_id
+  case_id="$(case_exists_or_die "$slug")"
+
+  # Draft resolution policy
+  local replay_id
+  if [[ -n "$replay_id_flag" ]]; then
+    # Validate that replay exists and is a draft
+    local replay_status
+    replay_status="$(db_query <<<"SELECT status FROM replays WHERE id=$replay_id_flag AND case_id=$case_id;")"
+    [[ -n "$replay_status" ]] || die "replay $replay_id_flag not found for case '$slug'"
+    [[ "$replay_status" == "draft" ]] || die "replay $replay_id_flag has status '$replay_status'; only draft replays accept new steps"
+    replay_id="$replay_id_flag"
+  elif (( force_new )); then
+    local now
+    now="$(now_utc)"
+    db_exec <<SQL
+INSERT INTO replays (case_id, status, origin, fsuite_version, actor, created_at, updated_at)
+  VALUES ($case_id, 'draft', 'recorded', $(sql_quote "$VERSION"), $(sql_quote "$(whoami)"), $(sql_quote "$now"), $(sql_quote "$now"));
+SQL
+    replay_id="$(db_query <<<"SELECT id FROM replays WHERE case_id=$case_id AND status='draft' ORDER BY id DESC LIMIT 1;")"
+  else
+    replay_id="$(get_or_create_draft_replay "$case_id")"
+  fi
+
+  # Derive mode
+  local mode
+  local -a tool_args=("${cmd_args[@]:1}")
+  mode="$(derive_mode "$tool_basename" "${tool_args[@]+"${tool_args[@]}"}")"
+
+  # Prepare temp files and cleanup trap
+  local stdout_file stderr_file
+  stdout_file="$(mktemp)"
+  stderr_file="$(mktemp)"
+  trap "rm -f '$stdout_file' '$stderr_file'" EXIT
+
+  # Record cwd and start time
+  local cwd started_at start_ns end_ns duration_ms
+  cwd="$PWD"
+  started_at="$(now_utc)"
+  start_ns="$(date +%s%N)"
+
+  # Execute command, capturing stdout/stderr
+  local child_rc=0
+  "${cmd_args[@]}" >"$stdout_file" 2>"$stderr_file" || child_rc=$?
+
+  end_ns="$(date +%s%N)"
+  duration_ms="$(( (end_ns - start_ns) / 1000000 ))"
+
+  # Extract result_summary (read_only only)
+  local result_summary=""
+  if [[ "$mode" == "read_only" ]]; then
+    result_summary="$(extract_result_summary "$tool_basename" "$stdout_file")"
+  fi
+
+  # Extract error_excerpt (failure only, bounded)
+  local error_excerpt=""
+  if (( child_rc != 0 )); then
+    error_excerpt="$(head -c "$MAX_ERROR_EXCERPT" "$stderr_file" 2>/dev/null || true)"
+  fi
+
+  # Build argv_json as JSON array via python3
+  local argv_json
+  argv_json="$(python3 -c "
+import json, sys
+args = sys.argv[1:]
+print(json.dumps(args))
+" "${cmd_args[@]}")"
+
+  # Insert step with BEGIN IMMEDIATE + retry loop
+  local sql_result="" attempt=0
+  local sq_argv sq_cwd sq_mode sq_purpose sq_provenance sq_started sq_result_summary sq_error_excerpt
+  sq_argv="$(sql_quote "$argv_json")"
+  sq_cwd="$(sql_quote "$cwd")"
+  sq_mode="$(sql_quote "$mode")"
+  sq_purpose="$(sql_quote "$purpose")"
+  sq_provenance="$(sql_quote "recorded")"
+  sq_started="$(sql_quote "$started_at")"
+  sq_result_summary="$(sql_quote "$result_summary")"
+  sq_error_excerpt="$(sql_quote "$error_excerpt")"
+
+  local insert_sql
+  insert_sql="$(cat <<SQL
+BEGIN IMMEDIATE;
+INSERT INTO replay_steps (replay_id, order_num, tool, argv_json, cwd, mode, purpose, provenance, exit_code, duration_ms, started_at, result_summary, error_excerpt)
+  VALUES ($replay_id, (SELECT COALESCE(MAX(order_num),0)+1 FROM replay_steps WHERE replay_id=$replay_id), $(sql_quote "$tool_basename"), $sq_argv, $sq_cwd, $sq_mode, $sq_purpose, $sq_provenance, $child_rc, $duration_ms, $sq_started, $sq_result_summary, $sq_error_excerpt);
+COMMIT;
+SQL
+)"
+
+  attempt=0
+  while (( attempt < 3 )); do
+    if sql_result="$({ emit_db_session_prefix; echo "$insert_sql"; } | sqlite3 "$DB_FILE" 2>&1)"; then
+      break
+    fi
+    if [[ "$sql_result" == *"database is locked"* || "$sql_result" == *"SQLITE_BUSY"* ]]; then
+      attempt=$((attempt + 1))
+      sleep 0.1
+    else
+      die "DB error: $sql_result"
+    fi
+  done
+  if (( attempt >= 3 )); then
+    die "DB busy after 3 retries — could not insert replay step"
+  fi
+
+  # Get the step_id we just inserted
+  local step_id
+  step_id="$(db_query <<<"SELECT id FROM replay_steps WHERE replay_id=$replay_id ORDER BY id DESC LIMIT 1;")"
+
+  # Insert links into replay_step_links
+  if (( ${#links[@]} > 0 )); then
+    local link_sql="BEGIN IMMEDIATE;"
+    for lnk in "${links[@]+"${links[@]}"}"; do
+      local link_type="${lnk%%:*}"
+      local link_ref="${lnk#*:}"
+      link_sql+="
+INSERT INTO replay_step_links (step_id, link_type, link_ref)
+  VALUES ($step_id, $(sql_quote "$link_type"), $(sql_quote "$link_ref"));"
+    done
+    link_sql+="
+COMMIT;"
+
+    attempt=0
+    while (( attempt < 3 )); do
+      if sql_result="$({ emit_db_session_prefix; echo "$link_sql"; } | sqlite3 "$DB_FILE" 2>&1)"; then
+        break
+      fi
+      if [[ "$sql_result" == *"database is locked"* || "$sql_result" == *"SQLITE_BUSY"* ]]; then
+        attempt=$((attempt + 1))
+        sleep 0.1
+      else
+        die "DB error inserting links: $sql_result"
+      fi
+    done
+    if (( attempt >= 3 )); then
+      die "DB busy after 3 retries — could not insert step links"
+    fi
+  fi
+
+  # Update replays.updated_at
+  local update_now
+  update_now="$(now_utc)"
+  db_exec <<<"UPDATE replays SET updated_at=$(sql_quote "$update_now") WHERE id=$replay_id;"
+
+  # Pass through stdout to caller
+  cat "$stdout_file"
+
+  # Pass through child stderr to caller
+  cat "$stderr_file" >&2
+
+  # Exit with child's exit code (transparent wrapper)
+  exit "$child_rc"
 }
 
 cmd_show() {
