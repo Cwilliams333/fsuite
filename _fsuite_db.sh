@@ -105,7 +105,6 @@ db_query() {
   fi
 
   has sqlite3 || die 3 "sqlite3 is required"
-  mkdir -p "$FCASE_DIR" 2>/dev/null || die "Cannot create $FCASE_DIR"
 
   if [[ -n "$separator" ]]; then
     { emit_db_session_prefix; cat; } | sqlite3 -separator "$separator" "$DB_FILE"
