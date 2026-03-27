@@ -14,9 +14,11 @@ override_dh_auto_install:
 	install -D -m 755 fcase $(CURDIR)/debian/fsuite/usr/bin/fcase
 	install -D -m 755 fedit $(CURDIR)/debian/fsuite/usr/bin/fedit
 	install -D -m 755 fmetrics $(CURDIR)/debian/fsuite/usr/bin/fmetrics
+	install -D -m 755 freplay $(CURDIR)/debian/fsuite/usr/bin/freplay
 	install -D -m 755 fmetrics-predict.py $(CURDIR)/debian/fsuite/usr/share/fsuite/fmetrics-predict.py
 	# Install shared library to /usr/share/fsuite
 	install -D -m 644 _fsuite_common.sh $(CURDIR)/debian/fsuite/usr/share/fsuite/_fsuite_common.sh
+	install -D -m 644 _fsuite_db.sh $(CURDIR)/debian/fsuite/usr/share/fsuite/_fsuite_db.sh
 
 override_dh_auto_build:
 	# Nothing to build - shell scripts
