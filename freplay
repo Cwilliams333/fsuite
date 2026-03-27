@@ -117,7 +117,7 @@ SUBCOMMANDS
   show       Show a recorded replay (latest or by --replay-id)
   list       List all replays for a case
   export     Export a replay as JSON
-  verify     Re-run a recorded command and compare output to stored result
+  verify     Validate a replay without executing (check paths, tools, links)
   promote    Promote a replay to canonical status
   archive    Archive (soft-delete) a replay
 
@@ -297,18 +297,31 @@ result = None
 
 if tool == 'ftree':
     if data and isinstance(data, dict):
-        snap = data.get('snapshot', '')
-        if snap:
-            result = 'snapshot: ' + snap[:200]
+        snap = data.get('snapshot')
+        if snap is not None:
+            if isinstance(snap, list):
+                entries = len(snap)
+            elif isinstance(snap, dict):
+                entries = len(snap)
+            else:
+                entries = '?'
+            size_val = data.get('size', data.get('total_size', ''))
+            result = f'snapshot: {entries} entries, {size_val}' if size_val else f'snapshot: {entries} entries'
         else:
             dirs = len(data.get('directories', []))
             files = len(data.get('files', []))
-            result = f'{dirs} dirs, {files} files'
-    elif 'snapshot:' in raw:
+            result = f'tree: {dirs} dirs, {files} files'
+    elif raw:
+        # Non-JSON tree output: count dirs/files from lines
+        dir_count = 0
+        file_count = 0
         for line in raw.splitlines():
-            if 'snapshot:' in line:
-                result = line.strip()[:240]
-                break
+            stripped = line.strip()
+            if stripped.endswith('/'):
+                dir_count += 1
+            elif stripped:
+                file_count += 1
+        result = f'tree: {dir_count} dirs, {file_count} files'
 
 elif tool == 'fsearch':
     if data and isinstance(data, dict):
@@ -514,50 +527,92 @@ SQL
   end_ns="$(date +%s%N)"
   duration_ms="$(( (end_ns - start_ns) / 1000000 ))"
 
-  # Extract result_summary (read_only only)
+  # Extract result_summary (read_only only); leave unset for NULL
   local result_summary=""
+  local has_result_summary=0
   if [[ "$mode" == "read_only" ]]; then
     result_summary="$(extract_result_summary "$tool_basename" "$stdout_file")"
+    [[ -n "$result_summary" ]] && has_result_summary=1
   fi
 
-  # Extract error_excerpt (failure only, bounded)
+  # Extract error_excerpt (failure only, bounded); leave unset for NULL
   local error_excerpt=""
+  local has_error_excerpt=0
   if (( child_rc != 0 )); then
     error_excerpt="$(head -c "$MAX_ERROR_EXCERPT" "$stderr_file" 2>/dev/null || true)"
+    [[ -n "$error_excerpt" ]] && has_error_excerpt=1
   fi
 
-  # Build argv_json as JSON array via python3
+  # Build argv_json as JSON array via python3 (args only, no tool path)
   local argv_json
   argv_json="$(python3 -c "
 import json, sys
 args = sys.argv[1:]
 print(json.dumps(args))
-" "${cmd_args[@]}")"
+" "${tool_args[@]+"${tool_args[@]}"}")"
 
   # Insert step with BEGIN IMMEDIATE + retry loop
   local sql_result="" attempt=0
-  local sq_argv sq_cwd sq_mode sq_purpose sq_provenance sq_started sq_result_summary sq_error_excerpt
+  local sq_argv sq_cwd sq_mode sq_purpose sq_provenance sq_started sq_result_summary sq_error_excerpt sq_telemetry_run_id
   sq_argv="$(sql_quote "$argv_json")"
   sq_cwd="$(sql_quote "$cwd")"
   sq_mode="$(sql_quote "$mode")"
-  sq_purpose="$(sql_quote "$purpose")"
+  # NULL when purpose not provided
+  if [[ -n "$purpose" ]]; then
+    sq_purpose="$(sql_quote "$purpose")"
+  else
+    sq_purpose="NULL"
+  fi
   sq_provenance="$(sql_quote "recorded")"
   sq_started="$(sql_quote "$started_at")"
-  sq_result_summary="$(sql_quote "$result_summary")"
-  sq_error_excerpt="$(sql_quote "$error_excerpt")"
+  # NULL when result_summary not populated
+  if (( has_result_summary )); then
+    sq_result_summary="$(sql_quote "$result_summary")"
+  else
+    sq_result_summary="NULL"
+  fi
+  # NULL when exit_code is 0 or error_excerpt not populated
+  if (( has_error_excerpt )); then
+    sq_error_excerpt="$(sql_quote "$error_excerpt")"
+  else
+    sq_error_excerpt="NULL"
+  fi
+  # telemetry_run_id from env var, or NULL
+  if [[ -n "${FSUITE_TELEMETRY_RUN_ID:-}" ]]; then
+    sq_telemetry_run_id="$(sql_quote "$FSUITE_TELEMETRY_RUN_ID")"
+  else
+    sq_telemetry_run_id="NULL"
+  fi
 
-  local insert_sql
-  insert_sql="$(cat <<SQL
-BEGIN IMMEDIATE;
-INSERT INTO replay_steps (replay_id, order_num, tool, argv_json, cwd, mode, purpose, provenance, exit_code, duration_ms, started_at, result_summary, error_excerpt)
-  VALUES ($replay_id, (SELECT COALESCE(MAX(order_num),0)+1 FROM replay_steps WHERE replay_id=$replay_id), $(sql_quote "$tool_basename"), $sq_argv, $sq_cwd, $sq_mode, $sq_purpose, $sq_provenance, $child_rc, $duration_ms, $sq_started, $sq_result_summary, $sq_error_excerpt);
-COMMIT;
-SQL
-)"
+  # Build the atomic SQL block: step INSERT + last_insert_rowid + links + updated_at
+  local update_now
+  update_now="$(now_utc)"
+
+  local atomic_sql
+  atomic_sql="BEGIN IMMEDIATE;
+INSERT INTO replay_steps (replay_id, order_num, tool, argv_json, cwd, mode, purpose, provenance, exit_code, duration_ms, started_at, telemetry_run_id, result_summary, error_excerpt)
+  VALUES ($replay_id, (SELECT COALESCE(MAX(order_num),0)+1 FROM replay_steps WHERE replay_id=$replay_id), $(sql_quote "$tool_basename"), $sq_argv, $sq_cwd, $sq_mode, $sq_purpose, $sq_provenance, $child_rc, $duration_ms, $sq_started, $sq_telemetry_run_id, $sq_result_summary, $sq_error_excerpt);"
+
+  # Append link INSERTs referencing the step we just inserted
+  if (( ${#links[@]} > 0 )); then
+    local lnk
+    for lnk in "${links[@]+"${links[@]}"}"; do
+      local link_type="${lnk%%:*}"
+      local link_ref="${lnk#*:}"
+      atomic_sql+="
+INSERT INTO replay_step_links (step_id, link_type, link_ref)
+  VALUES ((SELECT MAX(id) FROM replay_steps WHERE replay_id=$replay_id), $(sql_quote "$link_type"), $(sql_quote "$link_ref"));"
+    done
+  fi
+
+  # Update replays.updated_at
+  atomic_sql+="
+UPDATE replays SET updated_at=$(sql_quote "$update_now") WHERE id=$replay_id;
+COMMIT;"
 
   attempt=0
   while (( attempt < 3 )); do
-    if sql_result="$({ emit_db_session_prefix; echo "$insert_sql"; } | sqlite3 "$DB_FILE" 2>&1)"; then
+    if sql_result="$({ emit_db_session_prefix; echo "$atomic_sql"; } | sqlite3 "$DB_FILE" 2>&1)"; then
       break
     fi
     if [[ "$sql_result" == *"database is locked"* || "$sql_result" == *"SQLITE_BUSY"* ]]; then
@@ -570,45 +625,6 @@ SQL
   if (( attempt >= 3 )); then
     die "DB busy after 3 retries — could not insert replay step"
   fi
-
-  # Get the step_id we just inserted
-  local step_id
-  step_id="$(db_query <<<"SELECT id FROM replay_steps WHERE replay_id=$replay_id ORDER BY id DESC LIMIT 1;")"
-
-  # Insert links into replay_step_links
-  if (( ${#links[@]} > 0 )); then
-    local link_sql="BEGIN IMMEDIATE;"
-    for lnk in "${links[@]+"${links[@]}"}"; do
-      local link_type="${lnk%%:*}"
-      local link_ref="${lnk#*:}"
-      link_sql+="
-INSERT INTO replay_step_links (step_id, link_type, link_ref)
-  VALUES ($step_id, $(sql_quote "$link_type"), $(sql_quote "$link_ref"));"
-    done
-    link_sql+="
-COMMIT;"
-
-    attempt=0
-    while (( attempt < 3 )); do
-      if sql_result="$({ emit_db_session_prefix; echo "$link_sql"; } | sqlite3 "$DB_FILE" 2>&1)"; then
-        break
-      fi
-      if [[ "$sql_result" == *"database is locked"* || "$sql_result" == *"SQLITE_BUSY"* ]]; then
-        attempt=$((attempt + 1))
-        sleep 0.1
-      else
-        die "DB error inserting links: $sql_result"
-      fi
-    done
-    if (( attempt >= 3 )); then
-      die "DB busy after 3 retries — could not insert step links"
-    fi
-  fi
-
-  # Update replays.updated_at
-  local update_now
-  update_now="$(now_utc)"
-  db_exec <<<"UPDATE replays SET updated_at=$(sql_quote "$update_now") WHERE id=$replay_id;"
 
   # Pass through stdout to caller
   cat "$stdout_file"
