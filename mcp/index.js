@@ -981,7 +981,9 @@ const parsed = JSON.parse(stdout);
       return {
         content: [{ type: "text", text: lines.join("\n") }],
         structuredContent: parsed,
-      };      } catch {
+      };
+      } catch (renderErr) {
+        console.error("fs render error:", renderErr);
         return { content: [{ type: "text", text: stdout }] };
       }
     } catch (err) {
