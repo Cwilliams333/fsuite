@@ -11,8 +11,8 @@ MODE="source"
 PACKAGE_PATH=""
 VERIFY=1
 
-TOOLS=(fsuite ftree fsearch fcontent fmap fread fcase fedit fmetrics freplay fprobe)
-SHARE_FILES=(_fsuite_common.sh _fsuite_db.sh fmetrics-predict.py fprobe-engine.py)
+TOOLS=(fsuite ftree fsearch fcontent fmap fread fcase fedit fmetrics freplay fprobe fs)
+SHARE_FILES=(_fsuite_common.sh _fsuite_db.sh fmetrics-predict.py fprobe-engine.py fs-engine.py)
 
 die() {
   local code=1

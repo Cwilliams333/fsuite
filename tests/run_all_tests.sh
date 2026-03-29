@@ -143,6 +143,15 @@ main() {
     failed_suites+=("fprobe")
   fi
 
+  # ── fs ─────────────────────────────────────────────────────────
+  echo ""
+  if run_test_suite "${SCRIPT_DIR}/test_fs.sh" "fs (unified search)"; then
+    TOTAL_PASSED=$((TOTAL_PASSED + 1))
+  else
+    TOTAL_FAILED=$((TOTAL_FAILED + 1))
+    failed_suites+=("fs")
+  fi
+
   # Run installer tests
   echo ""
   if run_test_suite "${SCRIPT_DIR}/test_install.sh" "install.sh Test Suite"; then
