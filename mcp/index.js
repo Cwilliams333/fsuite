@@ -859,6 +859,85 @@ server.registerTool(
   }
 );
 
+// ─── fs (unified search orchestrator) ───────────────────────────
+server.registerTool(
+  "fs",
+  {
+    title: "fs",
+    description:
+      "Unified search orchestrator. One call to find files, content, or symbols. " +
+      "Auto-classifies query intent and chains the right fsuite tools (fsearch, fcontent, fmap). " +
+      "Returns ranked hits with enrichment and a recommended next step (next_hint). " +
+      "Use scope to narrow by file glob. Use intent to override auto-classification.",
+    inputSchema: z.object({
+      query: z.string().describe("Search intent: glob pattern, literal string, or code identifier"),
+      path: z.string().optional().describe("Search root directory (default: cwd)"),
+      scope: z.string().optional().describe("Glob filter to narrow file set first, e.g. '*.py'"),
+      intent: z.enum(["auto", "file", "content", "symbol"]).optional()
+        .describe("Override auto-classification. Default: auto"),
+    }),
+    outputSchema: z.object({
+      query: z.string(),
+      path: z.string(),
+      scope: z.string().optional(),
+      intent: z.enum(["auto", "file", "content", "symbol"]),
+      resolved_intent: z.enum(["file", "content", "symbol"]),
+      route_reason: z.string(),
+      route_confidence: z.enum(["high", "medium", "low"]),
+      selected_chain: z.array(z.string()),
+      hits: z.array(z.object({}).passthrough()),
+      truncated: z.boolean(),
+      budget: z.object({
+        candidate_files: z.number(),
+        enriched_files: z.number(),
+        time_ms: z.number(),
+      }),
+      next_hint: z.object({
+        tool: z.string(),
+        args: z.object({}).passthrough(),
+      }).nullable(),
+    }),
+  },
+  async ({ query, path, scope, intent }) => {
+    // fs bypasses cli() — cli() wraps in { content }, but we need raw JSON
+    // for structuredContent. Use run() + resolveTool() directly.
+    const args = ["-o", "json", query];
+    if (path) args.push("--path", path);
+    if (scope) args.push("--scope", scope);
+    if (intent) args.push("--intent", intent);
+    const { stdout } = await run(resolveTool("fs"), args, EXEC_OPTS);
+    try {
+      const parsed = JSON.parse(stdout);
+      const chain = parsed.selected_chain?.join(" → ") || "?";
+      const hitCount = parsed.hits?.length || 0;
+      const summary = [
+        `${parsed.resolved_intent} (${parsed.route_confidence}) via ${chain}`,
+        `  ${parsed.route_reason}`,
+        `  ${parsed.budget?.candidate_files || 0} candidates, ${parsed.budget?.enriched_files || 0} enriched, ${parsed.budget?.time_ms || 0}ms`,
+        `  ${hitCount} hits${parsed.truncated ? " (truncated)" : ""}`,
+      ];
+      if (parsed.hits) {
+        for (const h of parsed.hits.slice(0, 15)) {
+          const syms = h.symbols ? ` [${h.symbols.slice(0, 5).join(", ")}]` : "";
+          const mc = h.match_count ? ` (${h.match_count} matches)` : "";
+          summary.push(`    ${h.file}${mc}${syms}`);
+        }
+      }
+      if (parsed.next_hint) {
+        const nh = parsed.next_hint;
+        const argStr = Object.entries(nh.args || {}).map(([k, v]) => `${k}: ${v}`).join(", ");
+        summary.push(`\n  next → ${nh.tool}(${argStr})`);
+      }
+      return {
+        content: [{ type: "text", text: summary.join("\n") }],
+        structuredContent: parsed,
+      };
+    } catch {
+      return { content: [{ type: "text", text: stdout }] };
+    }
+  }
+);
+
 // ─── Start ───────────────────────────────────────────────────────
 const transport = new StdioServerTransport();
 await server.connect(transport);
