@@ -911,12 +911,31 @@ server.registerTool(
       intent: z.enum(["auto", "file", "content", "symbol"]).optional()
         .describe("Override auto-classification. Default: auto"),
     }),
-    // outputSchema removed — structuredContent causes Claude Code to display
-    // raw JSON instead of our pretty ANSI-rendered content text.
+    outputSchema: z.object({
+      query: z.string(),
+      path: z.string(),
+      scope: z.string().optional(),
+      intent: z.enum(["auto", "file", "content", "symbol"]),
+      resolved_intent: z.enum(["file", "content", "symbol"]),
+      route_reason: z.string(),
+      route_confidence: z.enum(["high", "medium", "low"]),
+      selected_chain: z.array(z.string()),
+      hits: z.array(z.object({}).passthrough()),
+      truncated: z.boolean(),
+      budget: z.object({
+        candidate_files: z.number(),
+        enriched_files: z.number(),
+        time_ms: z.number(),
+      }),
+      next_hint: z.object({
+        tool: z.string(),
+        args: z.object({}).passthrough(),
+      }).nullable(),
+    }),
   },
   async ({ query, path, scope, intent }) => {
-    // fs bypasses cli() — cli() wraps in { content }, but we need raw JSON
-    // for structuredContent. Use run() + resolveTool() directly.
+    // fs bypasses cli() — returns both pretty ANSI content AND typed
+    // structuredContent so agents get machine-readable output.
     const args = ["-o", "json", query];
     if (path) args.push("--path", path);
     if (scope) args.push("--scope", scope);
@@ -966,6 +985,7 @@ const parsed = JSON.parse(stdout);
 
       return {
         content: [{ type: "text", text: lines.join("\n") }],
+        structuredContent: parsed,
       };
       } catch (renderErr) {
         console.error("fs render error:", renderErr);
