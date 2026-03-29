@@ -73,32 +73,62 @@ const theme = {
   symbol:  (s) => `${fg(102, 217, 239)}${s}${RESET}`,
 };
 
-// ─── highlight.js → ANSI (walk the token tree) ──────────────────
-function resolveScope(scope) {
-  if (SCOPE_COLORS[scope]) return SCOPE_COLORS[scope];
-  const base = scope.split(".")[0];
-  if (SCOPE_COLORS[base]) return SCOPE_COLORS[base];
-  return fg(248, 248, 242);
-}
+// Map hljs CSS class → ANSI color
+const HLJS_CLASS_TO_ANSI = {
+  "hljs-keyword":    fg(249, 38, 114),
+  "hljs-built_in":   fg(166, 226, 46),
+  "hljs-type":       fg(166, 226, 46),
+  "hljs-literal":    fg(190, 132, 255),
+  "hljs-number":     fg(190, 132, 255),
+  "hljs-string":     fg(230, 219, 116),
+  "hljs-title":      fg(166, 226, 46),
+  "hljs-title.function": fg(166, 226, 46),
+  "hljs-title.class": fg(166, 226, 46),
+  "hljs-params":     fg(253, 151, 31),
+  "hljs-comment":    fg(117, 113, 94),
+  "hljs-meta":       fg(117, 113, 94),
+  "hljs-attr":       fg(166, 226, 46),
+  "hljs-attribute":  fg(166, 226, 46),
+  "hljs-variable":   fg(255, 255, 255),
+  "hljs-variable.language": fg(255, 255, 255),
+  "hljs-variable.constant_": fg(255, 255, 255),
+  "hljs-property":   fg(255, 255, 255),
+  "hljs-operator":   fg(249, 38, 114),
+  "hljs-punctuation": fg(248, 248, 242),
+  "hljs-symbol":     fg(190, 132, 255),
+  "hljs-regexp":     fg(230, 219, 116),
+  "hljs-subst":      fg(248, 248, 242),
+  "hljs-selector-tag": fg(249, 38, 114),
+  "hljs-selector-class": fg(166, 226, 46),
+  "hljs-name":       fg(249, 38, 114),
+  "hljs-function":   fg(166, 226, 46),
+};
 
-function walkTree(nodes) {
-  let out = "";
-  for (const node of nodes) {
-    if (typeof node === "string") {
-      out += node;
-    } else if (node.children) {
-      const color = resolveScope(node.scope || "");
-      out += color + walkTree(node.children) + RESET;
-    }
-  }
-  return out;
+// Convert hljs HTML output to ANSI-colored string
+function htmlToAnsi(html) {
+  const defaultFg = fg(248, 248, 242);
+  return html
+    // Replace <span class="hljs-xxx"> with ANSI color
+    .replace(/<span class="([^"]+)">/g, (_, cls) => {
+      // Try exact match, then first class
+      return HLJS_CLASS_TO_ANSI[cls] || HLJS_CLASS_TO_ANSI[cls.split(" ")[0]] || defaultFg;
+    })
+    // Replace </span> with reset + default fg
+    .replace(/<\/span>/g, RESET + defaultFg)
+    // Unescape HTML entities
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#x27;/g, "'")
+    .replace(/&#39;/g, "'");
 }
 
 function highlightLine(code, lang) {
   if (!lang) return fg(248, 248, 242) + code;
   try {
     const result = hljs.highlight(code, { language: lang, ignoreIllegals: true });
-    return walkTree(result._emitter.rootNode.children || []);
+    return fg(248, 248, 242) + htmlToAnsi(result.value) + RESET;
   } catch {
     return fg(248, 248, 242) + code;
   }
@@ -449,6 +479,58 @@ function renderFtreeResult(jsonStr) {
     return null;
   }
 }
+}
+
+// Extension → color for ls-style file listing
+const EXT_COLORS = {
+  js: fg(230, 219, 116),   // yellow
+  ts: fg(102, 217, 239),   // cyan
+  py: fg(166, 226, 46),    // green
+  rs: fg(253, 151, 31),    // orange
+  go: fg(102, 217, 239),   // cyan
+  rb: fg(249, 38, 114),    // pink
+  sh: fg(166, 226, 46),    // green
+  bash: fg(166, 226, 46),  // green
+  json: fg(230, 219, 116), // yellow
+  toml: fg(230, 219, 116), // yellow
+  yaml: fg(230, 219, 116), // yellow
+  yml: fg(230, 219, 116),  // yellow
+  md: fg(255, 255, 255),   // white
+  css: fg(102, 217, 239),  // cyan
+  html: fg(249, 38, 114),  // pink
+  c: fg(102, 217, 239),    // cyan
+  cpp: fg(102, 217, 239),  // cyan
+  h: fg(190, 132, 255),    // purple
+  java: fg(253, 151, 31),  // orange
+  kt: fg(190, 132, 255),   // purple
+  swift: fg(253, 151, 31), // orange
+  txt: fg(200, 200, 200),  // gray
+};
+
+function colorByExt(filename) {
+  const ext = filename.split(".").pop()?.toLowerCase() || "";
+  return EXT_COLORS[ext] || fg(248, 248, 242);
+}
+
+function renderFsearchResult(jsonStr) {
+try {
+  const d = JSON.parse(jsonStr);
+  if (!d.tool || d.tool !== "fsearch") return null;
+
+  let out = theme.meta(`${d.total_found} files found`) + "\n";
+
+  for (const filePath of (d.results || [])) {
+    const short = shortPath(filePath);
+    const filename = short.split("/").pop() || short;
+    const dir = short.substring(0, short.length - filename.length);
+    const color = colorByExt(filename);
+    out += `  ${DIM}${dir}${UNDIM}${color}${BOLD}${filename}${RESET}\n`;
+  }
+  return out;
+} catch {
+  return null;
+}
+}
 
 // Tool → renderer mapping
 const RENDERERS = {
@@ -458,6 +540,7 @@ const RENDERERS = {
   fmap: renderFmapResult,
   fcontent: renderFcontentResult,
   ftree: renderFtreeResult,
+  fsearch: renderFsearchResult,
 };
 
 // ─── Helper: run CLI tool, pretty-render if possible ─────────────
