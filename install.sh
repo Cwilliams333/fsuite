@@ -104,6 +104,11 @@ verify_install() {
     "${tool}" --version
   done
 
+# Verify engine resolution for tools with Python backends
+if command -v fprobe >/dev/null 2>&1; then
+  fprobe strings /dev/null >/dev/null 2>&1 || echo "Warning: fprobe engine resolution failed"
+fi
+
   verify_home="$(mktemp -d)"
   if ! verify_output="$(sqlite3 ':memory:' 'SELECT 1;' 2>&1 >/dev/null)"; then
     rm -rf "$verify_home"

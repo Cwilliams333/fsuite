@@ -1839,6 +1839,7 @@ validate_args() {
     fi
     LINES_START="${BASH_REMATCH[1]}"
     LINES_END="${BASH_REMATCH[2]}"
+    (( LINES_START >= 1 )) || { ERROR_CODE="invalid_args"; die "--lines START must be >= 1 (lines are 1-indexed)"; }
     (( LINES_START <= LINES_END )) || { ERROR_CODE="invalid_args"; die "--lines START must be <= END"; }
     (( WITH_SET == 1 )) || { ERROR_CODE="invalid_args"; die "--lines requires --with"; }
     return 0
@@ -1886,7 +1887,9 @@ process_edit() {
         build_patch_candidate "$original_file" "$candidate_file" || op_rc=$?
         ;;
       lines)
-        splice_line_range "$original_file" "$LINES_START" "$LINES_END" "$PAYLOAD_FILE" "$candidate_file" || {
+        local original_content
+        original_content=$(cat "$original_file")
+        splice_line_range "$original_file" "$LINES_START" "$LINES_END" "$(normalized_payload_file "$original_content")" "$candidate_file" || {
           op_rc=$?
           ERROR_CODE="lines_out_of_range"
           ERROR_DETAIL="Line range ${LINES_START}:${LINES_END} could not be applied"

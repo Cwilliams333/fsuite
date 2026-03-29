@@ -192,8 +192,7 @@ data = json.load(sys.stdin)
 
 if 'error' in data:
     print(f'fs: {data[\"error\"]}')
-    sys.exit(0)
-
+    sys.exit(1)
 intent = data.get('resolved_intent', '?')
 confidence = data.get('route_confidence', '?')
 reason = data.get('route_reason', '')

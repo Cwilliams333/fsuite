@@ -6,3 +6,6 @@ __pycache__/
 vm/state/
 docs/plans/
 mcp/node_modules/
+
+# Debian package staging dir — never commit
+debian/fsuite/

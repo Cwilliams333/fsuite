@@ -12,7 +12,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { writeFile as fsWriteFile, stat, mkdtemp, unlink, rmdir } from "node:fs/promises";
+import { writeFile as fsWriteFile, mkdtemp, unlink, rmdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import hljs from "highlight.js";
@@ -475,10 +475,10 @@ function boldMatchInAnsi(ansiStr, query) {
     result += ansiStr[i];
     rawPos++;
     i++;
-  }
-  return result;
 }
-
+if (boldStart && !boldEnd) result += "\x1b[22m";
+return result;
+}
 function renderFtreeResult(jsonStr) {
   try {
     const d = JSON.parse(jsonStr);
@@ -786,7 +786,7 @@ server.registerTool(
     } finally {
       // Cleanup temp file
       if (tmpFile) try { await unlink(tmpFile); } catch {}
-      if (tmpDir) try { const { rmdir } = await import("node:fs/promises"); await rmdir(tmpDir); } catch {}
+      if (tmpDir) try { await rmdir(tmpDir); } catch {}
     }
   }
 );
@@ -851,7 +851,6 @@ server.registerTool(
   }
 );
 
-// ─── Start
 // ─── fprobe ─────────────────────────────────────────────────────
 server.registerTool(
   "fprobe",
@@ -874,9 +873,15 @@ server.registerTool(
       ignore_case: z.boolean().optional().describe("Case-insensitive matching"),
     }),
   },
-  async ({ action, file, filter, pattern, context, offset, before, after, decode, ignore_case }) => {
-    const args = [action, file];
-    if (action === "strings" && filter) args.push("--filter", filter);
+async ({ action, file, filter, pattern, context, offset, before, after, decode, ignore_case }) => {
+if (action === "scan" && !pattern) {
+  return { content: [{ type: "text", text: "fprobe scan requires pattern" }], isError: true };
+}
+if (action === "window" && offset === undefined) {
+  return { content: [{ type: "text", text: "fprobe window requires offset" }], isError: true };
+}
+const args = [action, file];
+if (action === "strings" && filter) args.push("--filter", filter);
     if (action === "scan" && pattern) args.push("--pattern", pattern);
     if (context) args.push("--context", String(context));
     if (offset !== undefined) args.push("--offset", String(offset));

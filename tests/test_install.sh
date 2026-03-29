@@ -75,7 +75,8 @@ test_prefix_install_copies_tools_and_assets() {
     "${prefix}/bin/fs" \
     "${prefix}/share/fsuite/_fsuite_common.sh" \
     "${prefix}/share/fsuite/fmetrics-predict.py" \
-    "${prefix}/share/fsuite/fs-engine.py"; do
+    "${prefix}/share/fsuite/fs-engine.py" \
+"${prefix}/share/fsuite/fprobe-engine.py"; do
     [[ -e "$path" ]] || missing=1
   done
 
@@ -224,7 +225,11 @@ test_debian_packaging_declares_fcase_runtime_contract() {
 
   if [[ "$control" == *"Depends: "* ]] && \
      [[ "$control" == *"sqlite3"* ]] && \
-     [[ "$rules" == *"install -D -m 755 fcase "* ]]; then
+     [[ "$rules" == *"install -D -m 755 fcase "* ]] && \
+[[ "$rules" == *"fprobe"* ]] && \
+[[ "$rules" == *"fs "* ]] && \
+[[ "$rules" == *"fprobe-engine.py"* ]] && \
+[[ "$rules" == *"fs-engine.py"* ]]; then
     pass "Debian packaging declares fcase runtime dependency and install path"
   else
     fail "Debian packaging should include sqlite3 and install fcase" "control=$control rules=$rules"

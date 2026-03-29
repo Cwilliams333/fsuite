@@ -143,11 +143,17 @@ def main():
     p_scan.add_argument("--ignore-case", action="store_true")
 
     # window
+    def nonneg_int(x):
+        i = int(x)
+        if i < 0:
+            raise argparse.ArgumentTypeError(f"{x} must be >= 0")
+        return i
+
     p_win = sub.add_parser("window")
     p_win.add_argument("file")
-    p_win.add_argument("--offset", type=int, required=True)
-    p_win.add_argument("--before", type=int, default=0)
-    p_win.add_argument("--after", type=int, default=200)
+    p_win.add_argument("--offset", type=nonneg_int, required=True)
+    p_win.add_argument("--before", type=nonneg_int, default=0)
+    p_win.add_argument("--after", type=nonneg_int, default=200)
     p_win.add_argument("--decode", choices=["printable", "utf8", "hex"], default="printable")
 
     args = parser.parse_args()
