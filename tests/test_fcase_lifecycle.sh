@@ -66,26 +66,37 @@ run_fcase init migration-test --goal "Test migration" -o json >/dev/null 2>&1 ||
 
 DB="$TEST_HOME/.fsuite/fcase.db"
 
-# Check new columns exist
-result=$(sqlite3 "$DB" "PRAGMA table_info(cases);" 2>&1)
-assert_contains "resolution_summary column exists" "$result" "resolution_summary"
-assert_contains "resolved_at column exists" "$result" "resolved_at"
-assert_contains "archived_at column exists" "$result" "archived_at"
-assert_contains "deleted_at column exists" "$result" "deleted_at"
-assert_contains "delete_reason column exists" "$result" "delete_reason"
+# Check new columns exist (portable: SELECT column LIMIT 0 succeeds if column exists)
+result=$(sqlite3 "$DB" "SELECT resolution_summary FROM cases LIMIT 0;" 2>&1 && echo "ok" || echo "fail")
+assert_eq "resolution_summary column exists" "ok" "$result"
+result=$(sqlite3 "$DB" "SELECT resolved_at FROM cases LIMIT 0;" 2>&1 && echo "ok" || echo "fail")
+assert_eq "resolved_at column exists" "ok" "$result"
+result=$(sqlite3 "$DB" "SELECT archived_at FROM cases LIMIT 0;" 2>&1 && echo "ok" || echo "fail")
+assert_eq "archived_at column exists" "ok" "$result"
+result=$(sqlite3 "$DB" "SELECT deleted_at FROM cases LIMIT 0;" 2>&1 && echo "ok" || echo "fail")
+assert_eq "deleted_at column exists" "ok" "$result"
+result=$(sqlite3 "$DB" "SELECT delete_reason FROM cases LIMIT 0;" 2>&1 && echo "ok" || echo "fail")
+assert_eq "delete_reason column exists" "ok" "$result"
 
-# Check indexes exist
-result=$(sqlite3 "$DB" ".indexes" 2>&1)
-assert_contains "status+updated index exists" "$result" "idx_cases_status_updated"
-assert_contains "events case_id index exists" "$result" "idx_events_case_id"
-assert_contains "evidence case_id index exists" "$result" "idx_evidence_case_id"
-assert_contains "hypotheses case_id index exists" "$result" "idx_hypotheses_case_id"
-assert_contains "targets case_id index exists" "$result" "idx_targets_case_id"
-assert_contains "sessions case_id index exists" "$result" "idx_sessions_case_id"
+# Check indexes exist (portable: query sqlite_master instead of .indexes)
+result=$(sqlite3 "$DB" "SELECT count(*) FROM sqlite_master WHERE type='index' AND name='idx_cases_status_updated';" 2>&1)
+assert_eq "status+updated index exists" "1" "$result"
+result=$(sqlite3 "$DB" "SELECT count(*) FROM sqlite_master WHERE type='index' AND name='idx_events_case_id';" 2>&1)
+assert_eq "events case_id index exists" "1" "$result"
+result=$(sqlite3 "$DB" "SELECT count(*) FROM sqlite_master WHERE type='index' AND name='idx_evidence_case_id';" 2>&1)
+assert_eq "evidence case_id index exists" "1" "$result"
+result=$(sqlite3 "$DB" "SELECT count(*) FROM sqlite_master WHERE type='index' AND name='idx_hypotheses_case_id';" 2>&1)
+assert_eq "hypotheses case_id index exists" "1" "$result"
+result=$(sqlite3 "$DB" "SELECT count(*) FROM sqlite_master WHERE type='index' AND name='idx_targets_case_id';" 2>&1)
+assert_eq "targets case_id index exists" "1" "$result"
+result=$(sqlite3 "$DB" "SELECT count(*) FROM sqlite_master WHERE type='index' AND name='idx_sessions_case_id';" 2>&1)
+assert_eq "sessions case_id index exists" "1" "$result"
 
-# Check FTS table exists and is queryable
+# Check FTS table exists and is queryable (portable: check sqlite_master for FTS table)
+result=$(sqlite3 "$DB" "SELECT count(*) FROM sqlite_master WHERE name='cases_fts';" 2>&1)
+assert_eq "FTS table exists" "1" "$result"
 result=$(sqlite3 "$DB" "SELECT count(*) FROM cases_fts;" 2>&1)
-assert_eq "FTS table exists and queryable" "1" "$result"
+assert_eq "FTS table is queryable" "1" "$result"
 
 # Check FTS has the case we just created
 result=$(sqlite3 "$DB" "SELECT slug FROM cases_fts WHERE cases_fts MATCH 'migration';" 2>&1)

@@ -346,7 +346,7 @@ SELECT
   COALESCE((SELECT group_concat(COALESCE(t.path,'') || ' ' || COALESCE(t.symbol,''), ' ') FROM targets t WHERE t.case_id = c.id), ''),
   COALESCE((SELECT group_concat(COALESCE(e.summary,'') || ' ' || COALESCE(e.body,''), ' ') FROM evidence e WHERE e.case_id = c.id), ''),
   COALESCE((SELECT group_concat(COALESCE(h.body,'') || ' ' || COALESCE(h.reason,''), ' ') FROM hypotheses h WHERE h.case_id = c.id), ''),
-  COALESCE((SELECT group_concat(COALESCE(ev.payload_json,''), ' ') FROM events ev WHERE ev.case_id = c.id AND ev.event_type IN ('note','next_move','case_resolved','case_deleted')), '')
+  COALESCE((SELECT group_concat(COALESCE(ev.payload_json,''), ' ') FROM events ev WHERE ev.case_id = c.id AND ev.event_type IN ('note','next_move_set','case_resolved','case_deleted')), '')
 FROM cases c WHERE c.id = $case_id;
 SQL
 }

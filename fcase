@@ -107,6 +107,23 @@ is_valid_hypothesis_status() {
   esac
 }
 
+validate_status_filter() {
+  local filter="$1"
+  if [[ "$filter" == "all" ]]; then return 0; fi
+  local _old_ifs="${IFS:-}" _s _found
+  IFS=','
+  for _s in $filter; do
+    _found=false
+    case "$_s" in
+      open|resolved|archived|deleted) _found=true ;;
+    esac
+    IFS="$_old_ifs"
+    [[ "$_found" == "true" ]] || die "invalid status filter: '$_s' (allowed: open,resolved,archived,deleted,all)"
+    IFS=','
+  done
+  IFS="$_old_ifs"
+}
+
 parse_lines_range() {
   local raw="$1"
   [[ "$raw" =~ ^([0-9]+):([0-9]+)$ ]] || return 1
@@ -594,6 +611,8 @@ cmd_list() {
   [[ "$output" == "pretty" || "$output" == "json" ]] || die "Invalid --output: $output"
 
   ensure_db
+
+  validate_status_filter "$filter"
 
   # Build SQL WHERE clause from status filter
   local where_clause
@@ -1170,6 +1189,7 @@ cmd_hypothesis_set() {
   db_exec <<<"UPDATE hypotheses SET status = $(sql_quote "$status"), updated_at = $(sql_quote "$now")${update_reason}${update_confidence} WHERE id = $hypothesis_id AND case_id = $case_id;"
   db_exec <<<"UPDATE cases SET updated_at = $(sql_quote "$now") WHERE id = $case_id;"
   append_event "$case_id" "$session_id" "hypothesis_set" "$(printf '{"id":%s,"status":"%s"%s%s}' "$hypothesis_id" "$(printf '%s' "$status" | json_escape)" "$event_reason" "$( [[ -n "$confidence" ]] && printf ',\"confidence\":\"%s\"' "$(printf '%s' "$confidence" | json_escape)" )")" "$now"
+  rebuild_fts_for_case "$case_id"
   echo "Updated hypothesis ${hypothesis_id} for ${slug}"
 }
 
@@ -1364,6 +1384,8 @@ cmd_find() {
 
   ensure_db
 
+  validate_status_filter "$status_filter"
+
   # Build status WHERE clause (exclude deleted unless explicitly requested)
   local where_clause
   if [[ "$status_filter" == "all" ]]; then
@@ -1374,21 +1396,30 @@ cmd_find() {
     where_clause="c.status IN ('${sql_in}')"
   fi
 
-  # Build FTS match expression
-  local escaped_query
-  escaped_query=$(printf '%s' "$query" | sed "s/'/''/g")
+  # Build FTS match expression — sanitize for FTS4 injection safety.
+  # 1. Strip double-quotes (prevents phrase operator abuse).
+  # 2. Replace FTS boolean keywords (OR AND NOT NEAR) with their lowercase
+  #    forms so the tokenizer treats them as plain words, not operators.
+  # 3. Strip prefix operators (- and *) that FTS4 interprets specially.
+  # 4. SQL-escape single quotes.
+  local fts_safe
+  fts_safe=$(printf '%s' "$query" | sed 's/"//g' | sed 's/\*//g' | sed 's/\(^\| \)-/\1/g' \
+    | sed 's/\bOR\b/or/g; s/\bAND\b/and/g; s/\bNOT\b/not/g; s/\bNEAR\b/near/g' \
+    | sed "s/'/''/g")
   local fts_match
   if [[ "$deep" == "true" ]]; then
-    fts_match="'${escaped_query}'"
+    # Deep search: wrap in double quotes for phrase matching across all columns.
+    fts_match="'\"${fts_safe}\"'"
   else
-    # FTS4 column filter: col:term OR col:term for each shallow column
-    fts_match="'slug:${escaped_query} OR goal:${escaped_query} OR resolution_summary:${escaped_query}'"
+    # Shallow search: FTS4 column filters. Column prefix + double-quote phrase
+    # syntax is broken in FTS4, so use bare tokens with column prefix (implicit AND).
+    fts_match="'slug:${fts_safe} OR goal:${fts_safe} OR resolution_summary:${fts_safe}'"
   fi
 
   if [[ "$output" == "json" ]]; then
     db_query <<SQL
 SELECT json_object(
-  'query', '${escaped_query}',
+  'query', '${fts_safe}',
   'statuses', '${status_filter}',
   'deep', $([ "$deep" = "true" ] && echo "json('true')" || echo "json('false')"),
   'results', COALESCE((
@@ -1402,8 +1433,8 @@ SELECT json_object(
     WHERE cases_fts MATCH ${fts_match}
       AND ${where_clause}
     ORDER BY
-      CASE WHEN c.slug LIKE '%${escaped_query}%' THEN 0 ELSE 1 END,
-      CASE WHEN c.resolution_summary LIKE '%${escaped_query}%' THEN 0 ELSE 1 END,
+      CASE WHEN c.slug LIKE '%${fts_safe}%' THEN 0 ELSE 1 END,
+      CASE WHEN c.resolution_summary LIKE '%${fts_safe}%' THEN 0 ELSE 1 END,
       c.updated_at DESC
   ), json('[]'))
 );
@@ -1418,8 +1449,8 @@ JOIN cases c ON c.id = fts.rowid
 WHERE cases_fts MATCH ${fts_match}
   AND ${where_clause}
 ORDER BY
-  CASE WHEN c.slug LIKE '%${escaped_query}%' THEN 0 ELSE 1 END,
-  CASE WHEN c.resolution_summary LIKE '%${escaped_query}%' THEN 0 ELSE 1 END,
+  CASE WHEN c.slug LIKE '%${fts_safe}%' THEN 0 ELSE 1 END,
+  CASE WHEN c.resolution_summary LIKE '%${fts_safe}%' THEN 0 ELSE 1 END,
   c.updated_at DESC;
 SQL
     )
