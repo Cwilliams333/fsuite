@@ -119,7 +119,6 @@ CREATE TABLE IF NOT EXISTS replay_step_links (
 | `fcontent` | `read_only` |
 | `fmap` | `read_only` |
 | `fread` | `read_only` |
-| `fmetrics` | `read_only` |
 | `fprobe` | `read_only` |
 | `fcase status` | `read_only` |
 | `fcase handoff` | `read_only` |

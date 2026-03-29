@@ -21,8 +21,11 @@ fs [OPTIONS] <query> [path]
 |-------------|-----------------|-----------------|
 | `*.py`, `*.log`, `*.rs` | `file` | `fsearch` |
 | `renderTool`, `McpServer`, `AuthHandler` (camelCase / PascalCase) | `symbol` | `fsearch` -> `fmap --name` |
+| `parse_tokens`, `emit_chunk` (snake_case) | `symbol` | `fsearch` -> `fmap --name` |
+| `MAX_RETRIES`, `DB_PATH` (SCREAMING_CASE) | `symbol` | `fsearch` -> `fmap --name` |
 | `"error loading config"`, `"failed to connect"` (multi-word quoted) | `content` | `fcontent` |
 | `-i symbol authenticate` (forced override) | `symbol` | `fmap --name` |
+| `router`, `config`, `logger` (single bare word) | `content` (low-confidence) | `fcontent` |
 
 **Key capabilities:**
 

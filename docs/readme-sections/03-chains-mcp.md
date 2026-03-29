@@ -283,7 +283,7 @@ After adding the config, restart Claude Code. The tools appear as `mcp__fsuite__
 
 ### Registered Tools
 
-All 11 MCP tools with their functional roles:
+All 12 MCP tools with their functional roles:
 
 | Tool | Category | Description |
 |------|----------|-------------|

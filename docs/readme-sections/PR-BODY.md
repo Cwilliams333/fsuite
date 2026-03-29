@@ -40,7 +40,7 @@ The reconnaissance drones went from seeing text files to seeing inside compiled 
 
 | Tool | Feature | Description |
 |------|---------|-------------|
-| `fedit` | `--lines START:END` | Line-range replacement mode — no anchor text needed, chains directly from `fread` line numbers |
+| `fedit` | `--lines START:END` | Line-range replacement mode — no anchor text needed, chains directly from `fread` line numbers. Example: `fedit src/auth.py --lines 71:73 --with "return verify(token)" --apply` |
 | `fedit` | Pixel-perfect diff | MCP diff rendering matches Claude Code's native `Edit` diff view |
 | MCP adapter | Syntax highlighting | `highlight.js` with full Monokai color mapping, truecolor ANSI |
 | MCP adapter | Tool color palette | 5 semantic color groups across all 12 tools |
@@ -165,9 +165,9 @@ All 12 tools are included in the `.deb` package:
 
 | Method | Command |
 |--------|---------|
-| User install | `./install.sh --user` |
+| User install | `./install.sh --user` — installs to `~/.local/bin` (no sudo required) |
 | Debian package | `sudo dpkg -i fsuite_2.3.0-1_all.deb` |
-| Manual symlink | `sudo ln -s $(pwd)/<tool> /usr/local/bin/<tool>` (x12) |
+| Manual symlink | `sudo ln -s $(pwd)/<tool-name> /usr/local/bin/<tool-name>` (x12) |
 | MCP adapter | `cd mcp && npm install` + register in `~/.claude/settings.json` |
 
 ### MCP Setup
@@ -177,7 +177,7 @@ All 12 tools are included in the `.deb` package:
   "mcpServers": {
     "fsuite": {
       "command": "node",
-      "args": ["/path/to/fsuite/mcp/index.js"],
+      "args": ["</path/to/fsuite>/mcp/index.js"],
       "type": "stdio"
     }
   }

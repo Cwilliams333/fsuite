@@ -453,8 +453,11 @@ fs [OPTIONS] <query> [path]
 |-------------|-----------------|-----------------|
 | `*.py`, `*.log`, `*.rs` | `file` | `fsearch` |
 | `renderTool`, `McpServer`, `AuthHandler` (camelCase / PascalCase) | `symbol` | `fsearch` -> `fmap --name` |
+| `parse_tokens`, `emit_chunk` (snake_case) | `symbol` | `fsearch` -> `fmap --name` |
+| `MAX_RETRIES`, `DB_PATH` (SCREAMING_CASE) | `symbol` | `fsearch` -> `fmap --name` |
 | `"error loading config"`, `"failed to connect"` (multi-word quoted) | `content` | `fcontent` |
 | `-i symbol authenticate` (forced override) | `symbol` | `fmap --name` |
+| `router`, `config`, `logger` (single bare word) | `content` (low-confidence) | `fcontent` |
 
 **Key capabilities:**
 
@@ -530,6 +533,17 @@ fs --max-candidates 200 "*.go" /repo
 | `--timeout N` | `10` | Wall-time cap in seconds for the full chain |
 | `-h, --help` | — | Show usage |
 | `--version` | — | Print version |
+
+**MCP contract (v2.3.0+):**
+
+When called through the MCP adapter, `fs` declares an `outputSchema` (Zod-validated JSON shape) and returns both a `content` field (human-readable text summary for display) and a `structuredContent` field (the full machine-readable JSON result). This lets the client agent consume `structuredContent` directly — no JSON parsing of the text summary required.
+
+```
+content        → plain-text hit summary ("3 hits in 2 files — next: fread src/auth.ts --symbol renderTool")
+structuredContent → { tool, version, intent, query, hits[], hit_count, next_hint }
+```
+
+The `outputSchema` shape matches the JSON output example above. If `structuredContent` is absent (older clients), the agent should parse the JSON from `content` instead.
 
 ### `fsearch` &mdash; filename / path search
 
@@ -2128,10 +2142,10 @@ Copy-paste ready. Every command runs headless (no prompts, no TTY needed) unless
 | Call | What it does |
 |------|-------------|
 | `fs "authenticate"` | Unified search — scouts structure, finds files, maps symbols, returns ranked results in one call |
-| `fs "error handler" --scope /project/src` | Narrow the search surface to a subtree |
-| `fs "class AuthHandler" --type symbol` | Bias toward symbol-name matches over text content |
-| `fs "TODO" --type content` | Bias toward in-file text content matches |
-| `fs "*.log" --type file` | File-name pattern search via orchestrator |
+| `fs "error handler" --scope '**/*.py'` | Narrow the search surface to a file-type glob |
+| `fs "class AuthHandler" --intent symbol` | Force symbol-name intent over auto-detected content |
+| `fs "TODO" --intent content` | Force in-file text content intent |
+| `fs "*.log" --intent file` | Force file-name pattern intent |
 | `fs "def authenticate" -o json` | Structured JSON with ranked hits, tool breakdown, and confidence |
 
 ### `fprobe` — Binary Recon
@@ -2141,11 +2155,12 @@ Copy-paste ready. Every command runs headless (no prompts, no TTY needed) unless
 | `fprobe strings /path/to/binary` | Extract printable strings from a binary file |
 | `fprobe strings /path/to/binary --min-len 8` | Only strings of 8+ characters |
 | `fprobe strings /path/to/binary --filter "http"` | Strings containing a literal substring |
-| `fprobe scan /path/to/binary` | Full binary inventory: format, arch, size, section summary |
-| `fprobe scan /path/to/binary -o json` | JSON envelope: format, arch, entropy, section table |
-| `fprobe window /path/to/binary --offset 0x100 --size 256` | Read raw bytes from a specific offset |
-| `fprobe window /path/to/binary --offset 0x100 --size 256 --hex` | Hex dump of the window |
-| `fprobe window /path/to/binary --offset 0x100 --size 256 -o json` | JSON with hex, ascii, and offset metadata |
+| `fprobe scan /path/to/binary --pattern "userFacingName"` | Find a literal byte pattern; returns byte offset + context |
+| `fprobe scan /path/to/binary --pattern "renderTool" --context 200 -o json` | JSON with offset, hex context window, and surrounding bytes |
+| `fprobe window /path/to/binary --offset 0x100 --after 256` | Read 256 bytes after offset |
+| `fprobe window /path/to/binary --offset 0x100 --before 64 --after 256` | Read bytes before and after offset |
+| `fprobe window /path/to/binary --offset 0x100 --after 256 --decode hex` | Hex dump of the window |
+| `fprobe window /path/to/binary --offset 0x100 --after 256 -o json` | JSON with hex, printable text, and offset metadata |
 | `fprobe --self-check` | Verify `file`, `strings`, `xxd`/`od` availability |
 | `fprobe --version` | Print version |
 
@@ -2153,8 +2168,8 @@ Copy-paste ready. Every command runs headless (no prompts, no TTY needed) unless
 
 | Command | What it does |
 |---------|-------------|
-| `freplay record --case auth-seam --note "Traced denial branch"` | Record a derivation step with a note |
-| `freplay record --case auth-seam --cmd "fread /project/src/auth.py --around 'def authenticate'"` | Record a derivation step with the command that produced it |
+| `freplay record auth-seam --purpose "Traced denial branch" -- fread /project/src/auth.py --around 'def authenticate'` | Record a derivation step: case slug, optional purpose, then `--` separator, then the fsuite command |
+| `freplay record auth-seam -- fcontent -o paths "authenticate" src` | Record a content search step with no purpose annotation |
 | `freplay show auth-seam` | Show the full replay chain for a case in order |
 | `freplay show auth-seam -o json` | Machine-readable replay chain with timestamps |
 | `freplay list` | List all cases that have replay chains |
