@@ -174,6 +174,7 @@ function resolveTool(name) {
   return name; // resolve from PATH
 }
 
+// FSUITE_TELEMETRY=3: full telemetry (timing, args, results) for fmetrics import
 const EXEC_OPTS = { timeout: TOOL_TIMEOUT, maxBuffer: MAX_BUFFER, env: { ...process.env, FSUITE_TELEMETRY: "3" } };
 
 // ─── Per-tool color palette (256-color ANSI for Claude Code tool headers) ────
@@ -475,9 +476,9 @@ function boldMatchInAnsi(ansiStr, query) {
     result += ansiStr[i];
     rawPos++;
     i++;
-}
-if (boldStart && !boldEnd) result += "\x1b[22m";
-return result;
+  }
+  if (boldStart && !boldEnd) result += "\x1b[22m";
+  return result;
 }
 function renderFtreeResult(jsonStr) {
   try {
@@ -874,14 +875,14 @@ server.registerTool(
     }),
   },
 async ({ action, file, filter, pattern, context, offset, before, after, decode, ignore_case }) => {
-if (action === "scan" && !pattern) {
-  return { content: [{ type: "text", text: "fprobe scan requires pattern" }], isError: true };
-}
-if (action === "window" && offset === undefined) {
-  return { content: [{ type: "text", text: "fprobe window requires offset" }], isError: true };
-}
-const args = [action, file];
-if (action === "strings" && filter) args.push("--filter", filter);
+    if (action === "scan" && !pattern) {
+      return { content: [{ type: "text", text: "fprobe scan requires pattern" }], isError: true };
+    }
+    if (action === "window" && offset === undefined) {
+      return { content: [{ type: "text", text: "fprobe window requires offset" }], isError: true };
+    }
+    const args = [action, file];
+    if (action === "strings" && filter) args.push("--filter", filter);
     if (action === "scan" && pattern) args.push("--pattern", pattern);
     if (context) args.push("--context", String(context));
     if (offset !== undefined) args.push("--offset", String(offset));
