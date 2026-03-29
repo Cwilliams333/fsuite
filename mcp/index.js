@@ -479,7 +479,6 @@ function renderFtreeResult(jsonStr) {
     return null;
   }
 }
-}
 
 // Extension → color for ls-style file listing
 const EXT_COLORS = {
