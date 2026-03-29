@@ -78,36 +78,36 @@ MCP:  fs(query: "authenticate", scope: "*.py", path: "/repo")
 
 ```json
 {
-  "query": "authenticate",
-  "path": "/repo",
-  "scope": "*.py",
-  "intent": "auto",
-  "resolved_intent": "symbol",
-  "route_reason": "identifier-like token (camelCase), no glob chars, no extension → symbol chain",
-  "route_confidence": "high",
-  "selected_chain": ["fsearch", "fcontent", "fmap"],
-  "hits": [
-    {
-      "file": "/repo/src/auth.py",
-      "matches": [
-        { "line": 42, "text": "def authenticate(token, secret):", "type": "definition" }
-      ],
-      "symbols": ["authenticate", "verify_token", "AuthError"]
-    }
-  ],
-  "truncated": false,
-  "budget": {
-    "candidate_files": 12,
-    "enriched_files": 8,
-    "time_ms": 184
-  },
-  "next_hint": {
-    "tool": "fread",
-    "args": { "path": "/repo/src/auth.py", "symbol": "authenticate" }
+"query": "authenticate",
+"path": "/repo",
+"scope": "*.py",
+"intent": "auto",
+"resolved_intent": "content",
+"route_reason": "single lowercase word, ambiguous — scope present so fsearch narrows first",
+"route_confidence": "low",
+"selected_chain": ["fsearch", "fcontent"],
+"hits": [
+  {
+    "file": "/repo/src/auth.py",
+    "matches": [
+      { "line": 42, "text": "def authenticate(token, secret):" },
+      { "line": 87, "text": "    return authenticate(refresh_token, key)" }
+    ],
+    "match_count": 2
   }
+],
+"truncated": false,
+"budget": {
+  "candidate_files": 12,
+  "enriched_files": 0,
+  "time_ms": 184
+},
+"next_hint": {
+  "tool": "fread",
+  "args": { "path": "/repo/src/auth.py", "around": "authenticate" }
+}
 }
 ```
-
 ### Output Field Contracts
 
 | Field | Always present | Description |
@@ -152,7 +152,7 @@ runs against only those files.
 | no | `file` | fsearch |
 | no | `content` | fcontent |
 | no | `symbol` | fcontent → fmap |
-| yes | `file` | fsearch (scope IS the search) |
+| yes | `file` | fsearch with scope as glob, query filters within results |
 | yes | `content` | fsearch → fcontent (scoped) |
 | yes | `symbol` | fsearch → fcontent → fmap (scoped) |
 
@@ -260,6 +260,8 @@ server.registerTool("fs", {
   outputSchema: z.object({
     query: z.string(),
     path: z.string(),
+    scope: z.string().optional(),
+    intent: z.enum(["auto", "file", "content", "symbol"]),
     resolved_intent: z.enum(["file", "content", "symbol"]),
     route_reason: z.string(),
     route_confidence: z.enum(["high", "medium", "low"]),
@@ -276,10 +278,19 @@ server.registerTool("fs", {
       args: z.object({}).passthrough(),
     }).nullable(),
   }),
-}, async (args) => {
-  const result = await runToolRaw("fs", args);  // get raw JSON from engine
-  const parsed = JSON.parse(result);
-  const summary = formatFsSummary(parsed);       // human-readable text
+}, async ({ query, path, scope, intent }) => {
+  const args = ["-o", "json", query];
+  if (path) args.push("--path", path);
+  if (scope) args.push("--scope", scope);
+  if (intent) args.push("--intent", intent);
+  const raw = await cli(resolveTool("fs"), args);  // uses existing cli() helper
+  const parsed = JSON.parse(raw);
+  // Build human-readable summary inline (no new helper needed)
+  const chain = parsed.selected_chain?.join(" → ") || "?";
+  const hitCount = parsed.hits?.length || 0;
+  const summary = `${parsed.resolved_intent} (${parsed.route_confidence}) via ${chain}\n` +
+    `  ${parsed.route_reason}\n` +
+    `  ${hitCount} hits, ${parsed.budget?.time_ms || 0}ms`;
   return {
     content: [{ type: "text", text: summary }],
     structuredContent: parsed,
@@ -296,7 +307,7 @@ OPTIONS
   -s, --scope GLOB     Glob filter for file narrowing (e.g. "*.py")
   -i, --intent MODE    Override: auto|file|content|symbol (default: auto)
   -o, --output MODE    pretty|json (default: pretty for tty, json for pipe)
-  -p, --path PATH      Search root (default: .)
+  -p, --path PATH      Search root (default: .). Overrides positional [path].
   --max-candidates N   Override candidate file cap (default: 50)
   --max-enrich N       Override enrichment file cap (default: 15)
   --timeout N          Override wall time cap in seconds (default: 10)

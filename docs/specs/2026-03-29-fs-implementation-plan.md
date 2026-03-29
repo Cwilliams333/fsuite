@@ -879,6 +879,8 @@ server.registerTool(
     outputSchema: z.object({
       query: z.string(),
       path: z.string(),
+      scope: z.string().optional(),
+      intent: z.enum(["auto", "file", "content", "symbol"]),
       resolved_intent: z.enum(["file", "content", "symbol"]),
       route_reason: z.string(),
       route_confidence: z.enum(["high", "medium", "low"]),
