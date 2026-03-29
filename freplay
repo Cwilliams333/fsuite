@@ -69,6 +69,7 @@ declare -A TOOL_MODE_DEFAULT=(
   [fmap]="read_only"
   [fread]="read_only"
   [fedit]="read_only"
+  [fprobe]="read_only"
 )
 
 # Mode classification per fcase subcommand (subcommand → mode).
@@ -177,7 +178,7 @@ cmd_self_check() {
 is_fsuite_tool() {
   local tool_basename="$1"
   case "$tool_basename" in
-    ftree|fsearch|fcontent|fmap|fread|fcase|fedit|fsuite|fmetrics|freplay) return 0 ;;
+    ftree|fsearch|fcontent|fmap|fread|fcase|fedit|fsuite|fmetrics|freplay|fprobe) return 0 ;;
     *) return 1 ;;
   esac
 }

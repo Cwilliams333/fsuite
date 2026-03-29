@@ -1,0 +1,736 @@
+#!/usr/bin/env node
+// fsuite-mcp — Thin MCP adapter for fsuite CLI tools
+// Makes ftree, fmap, fread, fcontent, fsearch, fedit, fwrite, fcase show up
+// as native tool calls alongside Read, Edit, Grep in Claude/Codex.
+//
+// Architecture: The bash tools do all real work. This is a stateless dispatcher.
+// Security: Uses execFile (not exec) — arguments are array elements, never shell strings.
+// SDK: @modelcontextprotocol/sdk v1.28.0 — McpServer + registerTool (latest API)
+
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { z } from "zod";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { writeFile as fsWriteFile, access, stat, mkdtemp, unlink } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
+import hljs from "highlight.js";
+
+// ─── ANSI helpers ────────────────────────────────────────────────
+const RESET = "\x1b[0m";
+const DIM   = "\x1b[2m";
+const UNDIM = "\x1b[22m";
+const BOLD  = "\x1b[1m";
+
+const fg = (r, g, b) => `\x1b[38;2;${r};${g};${b}m`;
+const bg = (r, g, b) => `\x1b[48;2;${r};${g};${b}m`;
+
+// ─── Claude Code exact Monokai scope colors ──────────────────────
+const SCOPE_COLORS = {
+  keyword:              fg(249, 38, 114),
+  storage:              fg(102, 217, 239),
+  built_in:             fg(166, 226, 46),
+  type:                 fg(166, 226, 46),
+  literal:              fg(190, 132, 255),
+  number:               fg(190, 132, 255),
+  string:               fg(230, 219, 116),
+  title:                fg(166, 226, 46),
+  "title.function":     fg(166, 226, 46),
+  "title.class":        fg(166, 226, 46),
+  params:               fg(253, 151, 31),
+  comment:              fg(117, 113, 94),
+  meta:                 fg(117, 113, 94),
+  attr:                 fg(166, 226, 46),
+  attribute:            fg(166, 226, 46),
+  variable:             fg(255, 255, 255),
+  "variable.language":  fg(255, 255, 255),
+  property:             fg(255, 255, 255),
+  operator:             fg(249, 38, 114),
+  punctuation:          fg(248, 248, 242),
+  symbol:               fg(190, 132, 255),
+  regexp:               fg(230, 219, 116),
+  subst:                fg(248, 248, 242),
+};
+
+const DIFF_COLORS = {
+  addBg:         bg(2, 40, 0),
+  removeBg:      bg(61, 1, 0),
+  addGutterFg:   fg(80, 200, 80),
+  removeGutterFg:fg(220, 90, 90),
+  normalFg:      fg(248, 248, 242),
+};
+
+// Theme for non-diff output (metadata, warnings, etc.)
+const theme = {
+  meta:    (s) => `${DIM}${s}${UNDIM}`,
+  warn:    (s) => `${fg(255, 200, 50)}${s}${RESET}`,
+  error:   (s) => `${fg(255, 80, 80)}${s}${RESET}`,
+  ok:      (s) => `${fg(80, 200, 80)}${s}${RESET}`,
+  dryrun:  (s) => `${fg(255, 200, 50)}${s}${RESET}`,
+  lineNum: (s) => `${DIM}${s}${UNDIM}`,
+  path:    (s) => `${fg(102, 217, 239)}${s}${RESET}`,
+  symbol:  (s) => `${fg(102, 217, 239)}${s}${RESET}`,
+};
+
+// ─── highlight.js → ANSI (walk the token tree) ──────────────────
+function resolveScope(scope) {
+  if (SCOPE_COLORS[scope]) return SCOPE_COLORS[scope];
+  const base = scope.split(".")[0];
+  if (SCOPE_COLORS[base]) return SCOPE_COLORS[base];
+  return fg(248, 248, 242);
+}
+
+function walkTree(nodes) {
+  let out = "";
+  for (const node of nodes) {
+    if (typeof node === "string") {
+      out += node;
+    } else if (node.children) {
+      const color = resolveScope(node.scope || "");
+      out += color + walkTree(node.children) + RESET;
+    }
+  }
+  return out;
+}
+
+function highlightLine(code, lang) {
+  if (!lang) return fg(248, 248, 242) + code;
+  try {
+    const result = hljs.highlight(code, { language: lang, ignoreIllegals: true });
+    return walkTree(result._emitter.rootNode.children || []);
+  } catch {
+    return fg(248, 248, 242) + code;
+  }
+}
+
+function visibleLength(str) {
+  return str.replace(/\x1b\[[0-9;]*m/g, "").length;
+}
+
+// Detect language from file path extension
+function detectLang(filePath) {
+  if (!filePath) return "";
+  const ext = filePath.split(".").pop()?.toLowerCase();
+  if (ext && hljs.getLanguage(ext)) return ext;
+  const map = { rs: "rust", py: "python", js: "javascript", ts: "typescript",
+    sh: "bash", kt: "kotlin", rb: "ruby", yml: "yaml", md: "markdown",
+    h: "c", hpp: "cpp", cxx: "cpp" };
+  return map[ext] || ext || "";
+}
+
+const run = promisify(execFile);
+const TOOL_TIMEOUT = 30_000;
+const MAX_BUFFER = 1024 * 1024 * 5; // 5MB
+
+// Resolve tools from source tree (sibling of mcp/).
+// Since mcp/index.js is always run from the source tree, prefer source tools
+// over installed PATH versions — enables fast iteration without reinstalling.
+// Set FSUITE_USE_PATH=1 to force PATH resolution (e.g. in production).
+const FSUITE_SRC_DIR = process.env.FSUITE_USE_PATH
+  ? null
+  : join(dirname(new URL(import.meta.url).pathname), "..");
+
+function resolveTool(name) {
+  if (FSUITE_SRC_DIR) return join(FSUITE_SRC_DIR, name);
+  return name; // resolve from PATH
+}
+
+const EXEC_OPTS = { timeout: TOOL_TIMEOUT, maxBuffer: MAX_BUFFER, env: { ...process.env, FSUITE_TELEMETRY: "3" } };
+
+// (theme defined above with ANSI helpers)
+
+// ─── Path shortener ──────────────────────────────────────────────
+function shortPath(fullPath) {
+  if (!fullPath) return "";
+  const home = process.env.HOME || "/home/" + process.env.USER;
+  const cwd = process.cwd();
+
+  // If inside cwd, show relative
+  if (fullPath.startsWith(cwd + "/")) {
+    return fullPath.slice(cwd.length + 1);
+  }
+  // If under home, show ~/...
+  if (fullPath.startsWith(home + "/")) {
+    return "~/" + fullPath.slice(home.length + 1);
+  }
+  return fullPath;
+}
+
+// ─── Diff renderer (Claude Code exact — hljs + Monokai + truecolor bg) ─
+function colorizeDiff(diff, filePath) {
+  if (!diff) return "";
+  // MCP runs as stdio subprocess — stdout.columns is undefined (piped).
+  // Try stderr (may still be a TTY), env var, or fall back to generous default.
+  const cols = process.stderr.columns || parseInt(process.env.COLUMNS, 10) || 160;
+  const lang = detectLang(filePath || "");
+
+  let oldLine = 0, newLine = 0;
+  const diffLines = diff.split("\n");
+
+  // Find max line number for gutter width
+  let maxLn = 0;
+  for (const line of diffLines) {
+    const m = line.match(/@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
+    if (m) {
+      maxLn = Math.max(maxLn,
+        parseInt(m[1]) + parseInt(m[2] || "1"),
+        parseInt(m[3]) + parseInt(m[4] || "1"));
+    }
+  }
+  const gutterW = Math.max(3, String(maxLn).length);
+  const codeW = cols - gutterW - 3; // gutter + space + marker + space
+
+  return diffLines.map(line => {
+    if (line.startsWith("+++") || line.startsWith("---")) return "";
+
+    if (line.startsWith("@@")) {
+      const m = line.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+      if (m) { oldLine = parseInt(m[1]); newLine = parseInt(m[2]); }
+      return ""; // skip hunk headers — the line numbers tell the story
+    }
+
+    const marker = line[0]; // +, -, or space
+    const code = line.substring(1);
+
+    if (marker === "+") {
+      // ADDED: syntax highlighted + dark green bg + full width padding
+      const hl = highlightLine(code, lang);
+      const num = String(newLine++).padStart(gutterW);
+      const gutter = `${DIFF_COLORS.addBg}${DIFF_COLORS.addGutterFg} ${num} +`;
+      // Re-inject bg after every hljs RESET so background persists across tokens
+      const hlBg = hl.replace(/\x1b\[0m/g, `${RESET}${DIFF_COLORS.addBg}`);
+      const vis = gutterW + 3 + visibleLength(code);
+      const pad = " ".repeat(Math.max(0, cols - vis));
+      return `${gutter}${DIFF_COLORS.addBg}${hlBg}${DIFF_COLORS.addBg}${pad}${RESET}`;
+    }
+    if (marker === "-") {
+      // REMOVED: NO syntax highlight, plain white, dimmed, dark red bg, full width
+      const num = String(oldLine++).padStart(gutterW);
+      const gutter = `${DIFF_COLORS.removeBg}${DIFF_COLORS.removeGutterFg} ${num} -`;
+      const content = `${DIFF_COLORS.removeBg}${DIFF_COLORS.normalFg}${code}`;
+      const vis = gutterW + 3 + code.length;
+      const pad = " ".repeat(Math.max(0, cols - vis));
+      return `${DIM}${gutter}${content}${DIFF_COLORS.removeBg}${pad}${UNDIM}${RESET}`;
+    }
+    // CONTEXT: syntax highlighted, dimmed gutter, no bg
+    const hl = highlightLine(code, lang);
+    const num = String(newLine).padStart(gutterW);
+    oldLine++; newLine++;
+    return `${DIM} ${num}  ${UNDIM}${hl}${RESET}`;
+  }).filter(l => l !== "").join("\n");
+}
+
+// ─── Pretty renderers (ANSI, no markdown) ────────────────────────
+
+function renderFeditResult(jsonStr) {
+  try {
+    const d = JSON.parse(jsonStr);
+    if (!d.tool || d.tool !== "fedit") return null;
+
+    const mode = d.mode === "create" ? "create" : d.mode === "replace_file" ? "replace" : "patch";
+    const path = shortPath(d.path);
+
+    // Count diff lines for summary
+    let added = 0, removed = 0;
+    if (d.diff) {
+      for (const line of d.diff.split("\n")) {
+        if (line.startsWith("+") && !line.startsWith("+++")) added++;
+        if (line.startsWith("-") && !line.startsWith("---")) removed++;
+      }
+    }
+
+    const parts = [];
+    if (d.applied) {
+      parts.push(theme.ok("Applied"));
+    } else {
+      parts.push(theme.dryrun("Dry-run"));
+    }
+    if (added > 0) parts.push(theme.ok(`+${added}`));
+    if (removed > 0) parts.push(theme.error(`-${removed}`));
+    if (added > 0 || removed > 0) parts.push("lines");
+    if (!d.preconditions_ok) parts.push(theme.error("PRECONDITION FAILED"));
+
+    let out = parts.join(" ") + "\n";
+
+    if (d.error_code) {
+      out += theme.error(`Error: ${d.error_code}`) + ` \u2014 ${d.error_detail}\n`;
+      return out;
+    }
+
+    if (d.diff) {
+      const MAX_DIFF_LINES = 30;
+      if ((mode === "create" || mode === "replace") && added > MAX_DIFF_LINES) {
+        const diffLines = d.diff.split("\n").filter(l => !l.startsWith("---") && !l.startsWith("+++"));
+        const preview = diffLines.slice(0, 8);
+        const tail = diffLines.slice(-3);
+        out += colorizeDiff(preview.join("\n"), d.path) + "\n";
+        out += theme.meta(`  ... ${added - 11} more lines ...`) + "\n";
+        out += colorizeDiff(tail.join("\n"), d.path) + "\n";
+      } else {
+        out += colorizeDiff(d.diff, d.path) + "\n";
+      }
+    }
+
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+function renderFreadResult(jsonStr) {
+  try {
+    const d = JSON.parse(jsonStr);
+    if (!d.tool || d.tool !== "fread") return null;
+
+    let meta = `${d.lines_emitted} lines | ~${d.token_estimate} tokens`;
+    if (d.symbol_resolution) {
+      meta += ` | L${d.symbol_resolution.line_start}-${d.symbol_resolution.line_end}`;
+    }
+    if (d.truncated) meta += ` ${theme.warn("truncated")}`;
+    let out = theme.meta(meta) + "\n";
+
+    for (const w of (d.warnings || [])) {
+      out += `   ${theme.warn("\u26a0 " + w)}\n`;
+    }
+    for (const e of (d.errors || [])) {
+      out += `   ${theme.error("\u2716 " + e)}\n`;
+    }
+    for (const f of (d.files || [])) {
+      if (f.status && f.status !== "read") {
+        out += `   ${theme.warn(shortPath(f.path) + ": " + f.status)}\n`;
+      }
+    }
+
+    const lang = detectLang(d.symbol_resolution?.path || d.files?.[0]?.path || "");
+
+    for (const chunk of (d.chunks || [])) {
+      for (const rawLine of chunk.content) {
+        const m = rawLine.match(/^(\d+)(\s{2,})(.*)/);
+        if (m) {
+          const ln = `${DIM} ${m[1].padStart(4)} ${UNDIM}`;
+          const hl = highlightLine(m[3], lang);
+          out += `${ln}${hl}${RESET}\n`;
+        } else {
+          out += rawLine + "\n";
+        }
+      }
+    }
+
+    if (d.next_hint) out += theme.meta(`next: ${d.next_hint}`) + "\n";
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+function renderFmapResult(jsonStr) {
+  try {
+    const d = JSON.parse(jsonStr);
+    if (!d.tool || d.tool !== "fmap") return null;
+
+    let meta = `${d.total_symbols} symbols`;
+    if (d.files?.[0]?.language) meta += ` | ${d.files[0].language}`;
+    if (d.shown_symbols < d.total_symbols) meta += ` ${theme.warn(`(${d.shown_symbols}/${d.total_symbols} shown)`)}`;
+    let out = theme.meta(meta) + "\n";
+
+    for (const file of (d.files || [])) {
+      const lang = detectLang(file.path || "");
+      for (const sym of file.symbols) {
+        const text = sym.text.trim().substring(0, 65);
+        const typeColor = sym.type === "function" ? fg(166, 226, 46) :
+                          sym.type === "class" ? fg(253, 151, 31) :
+                          sym.type === "import" ? fg(117, 113, 94) :
+                          sym.type === "constant" ? fg(190, 132, 255) :
+                          fg(248, 248, 242);
+        const hl = highlightLine(text, lang);
+        out += `  ${DIM}${String(sym.line).padStart(4)}${UNDIM}  ${typeColor}${sym.type.padEnd(9)}${RESET} ${hl}${RESET}\n`;
+      }
+    }
+
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+function renderFcontentResult(jsonStr) {
+try {
+  const d = JSON.parse(jsonStr);
+  if (!d.tool || d.tool !== "fcontent") return null;
+
+  const query = d.query || "";
+
+  if (d.shown_matches === 0) {
+    return theme.meta("no matches") + "\n";
+  }
+  let out = theme.meta(`${d.total_matched_files} files, ${d.shown_matches} matches`) + "\n";
+
+  for (const m of (d.matches || [])) {
+    // Parse "filepath:linenum:content"
+    const firstColon = m.indexOf(":");
+    const secondColon = firstColon > -1 ? m.indexOf(":", firstColon + 1) : -1;
+    if (secondColon > -1) {
+      const filePath = m.substring(0, firstColon);
+      const lineNum = m.substring(firstColon + 1, secondColon);
+      const content = m.substring(secondColon + 1);
+
+      // Detect language + syntax highlight
+      const ext = filePath.split(".").pop() || "";
+      const lang = detectLang(ext);
+      let colored = lang ? highlightLine(content, lang) : content;
+
+      // Bold the queried string inside highlighted output
+      if (query) colored = boldMatchInAnsi(colored, query);
+
+      out += `  ${theme.path(shortPath(filePath) + ":" + lineNum)} ${colored}\n`;
+    } else {
+      out += `  ${m}\n`;
+    }
+  }
+  return out;
+} catch {
+  return null;
+}
+}
+
+// Bold a literal query match inside an ANSI-colored string
+function boldMatchInAnsi(ansiStr, query) {
+  const raw = ansiStr.replace(/\x1b\[[0-9;]*m/g, "");
+  const matchIdx = raw.indexOf(query);
+  if (matchIdx === -1) return ansiStr;
+
+  let rawPos = 0, i = 0, result = "";
+  let boldStart = false, boldEnd = false;
+
+  while (i < ansiStr.length) {
+    // Pass through ANSI escapes without counting
+    if (ansiStr[i] === "\x1b") {
+      let j = i + 1;
+      while (j < ansiStr.length && ansiStr[j] !== "m") j++;
+      result += ansiStr.substring(i, j + 1);
+      i = j + 1;
+      continue;
+    }
+    if (rawPos === matchIdx && !boldStart) {
+      result += BOLD;
+      boldStart = true;
+    }
+    if (rawPos === matchIdx + query.length && !boldEnd) {
+      result += "\x1b[22m"; // unbold
+      boldEnd = true;
+    }
+    result += ansiStr[i];
+    rawPos++;
+    i++;
+  }
+  return result;
+}
+
+function renderFtreeResult(jsonStr) {
+  try {
+    const d = JSON.parse(jsonStr);
+    if (!d.tool || d.tool !== "ftree") return null;
+
+    const recon = d.snapshot?.recon;
+    const path = recon?.path || "";
+
+    let out = "";
+    if (recon) {
+      out += theme.meta(`${recon.total_entries} entries | depth ${recon.recon_depth}`) + "\n";
+    }
+
+    const tree = d.snapshot?.tree;
+    if (tree?.lines) {
+      out += tree.lines.join("\n") + "\n";
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+// Tool → renderer mapping
+const RENDERERS = {
+  fedit: renderFeditResult,
+  fwrite: renderFeditResult,
+  fread: renderFreadResult,
+  fmap: renderFmapResult,
+  fcontent: renderFcontentResult,
+  ftree: renderFtreeResult,
+};
+
+// ─── Helper: run CLI tool, pretty-render if possible ─────────────
+async function cli(tool, args, renderAs) {
+  try {
+    const { stdout, stderr } = await run(resolveTool(tool), args, EXEC_OPTS);
+    const raw = stdout || stderr || "(no output)";
+
+    // Try pretty rendering
+    const renderer = RENDERERS[renderAs || tool];
+    if (renderer) {
+      const pretty = renderer(raw);
+      if (pretty) return { content: [{ type: "text", text: pretty }] };
+    }
+
+    return { content: [{ type: "text", text: raw }] };
+  } catch (err) {
+    return { content: [{ type: "text", text: `Error running ${tool}: ${err.stderr || err.stdout || err.message}` }], isError: true };
+  }
+}
+
+// ─── Server ──────────────────────────────────────────────────────
+const server = new McpServer({ name: "fsuite", version: "1.0.0" });
+
+// ─── ftree ───────────────────────────────────────────────────────
+server.registerTool(
+  "ftree",
+  {
+    title: "ftree",
+    description:
+      "Scout a directory — returns full tree structure, file sizes, and recon data in one call. " +
+      "Replaces multiple Glob/LS calls. Use snapshot=true for combined recon+tree (recommended).",
+    inputSchema: z.object({
+      path: z.string().describe("Directory to scan"),
+      snapshot: z.boolean().default(true).describe("Combined recon + tree mode (recommended)"),
+      depth: z.number().optional().describe("Tree depth limit"),
+    }),
+  },
+  async ({ path, snapshot, depth }) => {
+    const args = [];
+    if (snapshot) args.push("--snapshot");
+    args.push("-o", "json");
+    if (depth) args.push("--depth", String(depth));
+    args.push(path);
+    return cli("ftree", args);
+  }
+);
+
+// ─── fmap ────────────────────────────────────────────────────────
+server.registerTool(
+  "fmap",
+  {
+    title: "fmap",
+    description:
+      "Code cartography — extract all symbols (functions, classes, imports, constants) from files. " +
+      "Returns symbol name, line number, type, and indent. No native equivalent exists. 15+ languages.",
+    inputSchema: z.object({
+      path: z.string().describe("File or directory to map"),
+    }),
+  },
+  async ({ path }) => cli("fmap", ["-o", "json", path])
+);
+
+// ─── fread ───────────────────────────────────────────────────────
+server.registerTool(
+  "fread",
+  {
+    title: "fread",
+    description:
+      "Budgeted file reading with symbol resolution. Use symbol to read exactly one function/class " +
+      "by name — no guessing line ranges. Use around for context around a pattern match.",
+    inputSchema: z.object({
+      path: z.string().describe("File path (or directory when using symbol)"),
+      symbol: z.string().optional().describe("Read exactly one symbol (function, class, etc.) by name"),
+      lines: z.string().optional().describe("Line range, e.g. '120:220'"),
+      around: z.string().optional().describe("Show context around first literal pattern match"),
+      around_line: z.number().optional().describe("Show context around a specific line number"),
+      before: z.number().optional().describe("Lines of context before match (default 5)"),
+      after: z.number().optional().describe("Lines of context after match (default 10)"),
+      head: z.number().optional().describe("Read first N lines"),
+      tail: z.number().optional().describe("Read last N lines"),
+      max_lines: z.number().optional().describe("Cap total lines emitted (default 200)"),
+    }),
+  },
+  async ({ path, symbol, lines, around, around_line, before, after, head, tail, max_lines }) => {
+    const args = [path];
+    if (symbol) args.push("--symbol", symbol);
+    if (lines) args.push("-r", lines);
+    if (around) args.push("--around", around);
+    if (around_line !== undefined) args.push("--around-line", String(around_line));
+    if (before !== undefined) args.push("-B", String(before));
+    if (after !== undefined) args.push("-A", String(after));
+    if (head !== undefined) args.push("--head", String(head));
+    if (tail !== undefined) args.push("--tail", String(tail));
+    if (max_lines !== undefined) args.push("--max-lines", String(max_lines));
+    args.push("-o", "json");
+    return cli("fread", args);
+  }
+);
+
+// ─── fcontent ────────────────────────────────────────────────────
+server.registerTool(
+  "fcontent",
+  {
+    title: "fcontent",
+    description:
+      "Search inside files for literal strings. Wraps ripgrep with agent-friendly output. " +
+      "Use LITERAL strings only — no grep regex. For multiple terms, call multiple times.",
+    inputSchema: z.object({
+      query: z.string().describe("Literal string to search for"),
+      path: z.string().optional().describe("Directory to search (recursive). Default: cwd"),
+      output: z.enum(["json", "paths", "pretty"]).default("json").describe("Output format"),
+      max_matches: z.number().optional().describe("Limit matched lines (default 200)"),
+      case_insensitive: z.boolean().optional().describe("Case-insensitive search"),
+    }),
+  },
+  async ({ query, path, output, max_matches, case_insensitive }) => {
+    const args = [query];
+    if (path) args.push(path);
+    args.push("-o", output);
+    if (max_matches) args.push("-m", String(max_matches));
+    if (case_insensitive) args.push("--rg-args", "-i");
+    return cli("fcontent", args);
+  }
+);
+
+// ─── fsearch ─────────────────────────────────────────────────────
+server.registerTool(
+  "fsearch",
+  {
+    title: "fsearch",
+    description: "Find files by name, glob pattern, or extension. Returns matching file paths.",
+    inputSchema: z.object({
+      query: z.string().describe("Glob pattern or filename (e.g. '*.rs', 'app.rs')"),
+      path: z.string().optional().describe("Directory to search"),
+      output: z.enum(["json", "paths", "pretty"]).default("json"),
+    }),
+  },
+  async ({ query, path, output }) => {
+    const args = ["-o", output, query];
+    if (path) args.push(path);
+    return cli("fsearch", args);
+  }
+);
+
+// ─── fedit ───────────────────────────────────────────────────────
+server.registerTool(
+  "fedit",
+  {
+    title: "fedit",
+    description:
+      "Surgical file editing — PREFERRED over native Edit. Auto-applies by default. " +
+      "Supports symbol-scoped patches (--function), insert after/before anchors, line-range replace, and preconditions. " +
+      "No need to read file first. Use function_name to scope edits without needing unique context. " +
+      "Use after/before to INSERT text at an anchor point instead of replacing. " +
+      "Use lines to replace a line range directly (e.g. '71:73') — fastest mode when you know the line numbers from fread.",
+    inputSchema: z.object({
+      path: z.string().describe("File to edit"),
+      replace: z.string().optional().describe("Text to find and replace (omit when using after/before/lines mode)"),
+      with_text: z.string().describe("Replacement text, or text to insert when using after/before"),
+      function_name: z.string().optional().describe("Scope edit to this function/symbol — no need for large unique context"),
+      after: z.string().optional().describe("Insert with_text AFTER this anchor text (insert mode)"),
+      before: z.string().optional().describe("Insert with_text BEFORE this anchor text (insert mode)"),
+      lines: z.string().optional().describe("Replace line range directly, e.g. '71:73'. Fastest mode — no text matching needed. Use line numbers from fread."),
+      apply: z.boolean().default(true).describe("Apply changes (default: true). Set false for dry-run preview."),
+      expect: z.string().optional().describe("Precondition — text that must exist in file for edit to proceed"),
+    }),
+  },
+  async ({ path, replace, with_text, function_name, after, before, lines, apply, expect }) => {
+    const args = [path];
+    if (function_name) args.push("--function", function_name);
+    if (lines) {
+      args.push("--lines", lines, "--with", with_text);
+    } else if (after) {
+      args.push("--after", after, "--with", with_text);
+    } else if (before) {
+      args.push("--before", before, "--with", with_text);
+    } else if (replace) {
+      args.push("--replace", replace, "--with", with_text);
+    }
+    if (apply) args.push("--apply");
+    if (expect) args.push("--expect", expect);
+    args.push("-o", "json");
+    return cli("fedit", args);
+  }
+);
+
+// ─── fwrite ──────────────────────────────────────────────────────
+// Two doorways, one brain. fwrite routes through fedit --create / --replace-file.
+server.registerTool(
+  "fwrite",
+  {
+    title: "fwrite",
+    description:
+      "Create a new file or replace an existing one. Routes through fedit (one mutation brain). " +
+      "Set overwrite=true to replace existing files. Auto-applies by default.",
+    inputSchema: z.object({
+      path: z.string().describe("Absolute file path to write"),
+      content: z.string().describe("File content to write"),
+      overwrite: z.boolean().default(false).describe("Replace existing file (default: false = create only)"),
+      apply: z.boolean().default(true).describe("Apply changes (default: true). Set false for dry-run preview."),
+    }),
+  },
+  async ({ path: filePath, content, overwrite, apply }) => {
+    // Write content to a temp file for fedit --content-file
+    let tmpDir, tmpFile;
+    try {
+      tmpDir = await mkdtemp(join(tmpdir(), "fwrite-"));
+      tmpFile = join(tmpDir, "payload");
+      await fsWriteFile(tmpFile, content, "utf-8");
+
+      const args = [];
+      if (overwrite) {
+        args.push("--replace-file", filePath, "--content-file", tmpFile);
+      } else {
+        args.push("--create", filePath, "--content-file", tmpFile);
+      }
+      if (apply) args.push("--apply");
+      args.push("-o", "json");
+
+      return await cli("fedit", args);
+    } finally {
+      // Cleanup temp file
+      if (tmpFile) try { await unlink(tmpFile); } catch {}
+      if (tmpDir) try { const { rmdir } = await import("node:fs/promises"); await rmdir(tmpDir); } catch {}
+    }
+  }
+);
+
+// ─── fcase ───────────────────────────────────────────────────────
+server.registerTool(
+  "fcase",
+  {
+    title: "fcase",
+    description:
+      "Investigation continuity ledger. Track findings, evidence, and handoff state across sessions.",
+    inputSchema: z.object({
+      action: z.enum(["init", "note", "status", "list", "next", "handoff", "export"]).describe("Case action"),
+      slug: z.string().optional().describe("Case identifier (e.g. 'auth-refactor')"),
+      goal: z.string().optional().describe("Case goal (for init)"),
+      body: z.string().optional().describe("Note body (for note/next)"),
+      priority: z.enum(["low", "medium", "high", "critical"]).optional(),
+    }),
+  },
+  async ({ action, slug, goal, body, priority }) => {
+    const args = [action];
+    if (slug) args.push(slug);
+    if (goal) args.push("--goal", goal);
+    if (body) args.push("--body", body);
+    if (priority) args.push("--priority", priority);
+    args.push("-o", "pretty");
+    return cli("fcase", args);
+  }
+);
+
+// ─── fmetrics ────────────────────────────────────────────────────
+server.registerTool(
+  "fmetrics",
+  {
+    title: "fmetrics",
+    description: "Telemetry analytics — import data, show stats, history, or predict runtimes.",
+    inputSchema: z.object({
+      action: z.enum(["import", "stats", "history", "predict"]).describe("Metrics action"),
+      tool: z.string().optional().describe("Filter by tool name"),
+    }),
+  },
+  async ({ action, tool }) => {
+    const args = [action];
+    if (tool) args.push("--tool", tool);
+    return cli("fmetrics", args);
+  }
+);
+
+// ─── Start ───────────────────────────────────────────────────────
+const transport = new StdioServerTransport();
+await server.connect(transport);

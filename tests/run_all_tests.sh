@@ -134,6 +134,15 @@ main() {
     failed_suites+=("freplay")
   fi
 
+  # Run fprobe tests
+  echo ""
+  if run_test_suite "${SCRIPT_DIR}/test_fprobe.sh" "fprobe Test Suite"; then
+    TOTAL_PASSED=$((TOTAL_PASSED + 1))
+  else
+    TOTAL_FAILED=$((TOTAL_FAILED + 1))
+    failed_suites+=("fprobe")
+  fi
+
   # Run installer tests
   echo ""
   if run_test_suite "${SCRIPT_DIR}/test_install.sh" "install.sh Test Suite"; then
