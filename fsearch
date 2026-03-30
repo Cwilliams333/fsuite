@@ -288,7 +288,7 @@ OPTIONS
         auto:    legacy heuristic in file/name mode only
         literal: use the query as-is
         glob:    treat the query as a glob pattern
-        ext:     explicit extension mode placeholder
+        ext:     force extension normalization (log -> *.log)
 
   --preview N
       Reserved shallow preview depth. Default: 0
