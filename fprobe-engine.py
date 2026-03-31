@@ -135,10 +135,15 @@ def patch_binary(file_path, target_str, replacement_str, dry_run=False):
             shutil.copy2(write_path, backup_path)
         # Write via temp file + rename to handle "Text file busy"
         tmp_path = write_path + ".fprobe-tmp"
-        with open(tmp_path, "wb") as f:
-            f.write(data)
-        os.chmod(tmp_path, os.stat(write_path).st_mode)
-        os.rename(tmp_path, write_path)
+        try:
+            with open(tmp_path, "wb") as f:
+                f.write(data)
+            os.chmod(tmp_path, os.stat(write_path).st_mode)
+            os.rename(tmp_path, write_path)
+        except Exception:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+            raise
 
     return {
         "patched": len(offsets),

@@ -47,6 +47,7 @@ USAGE
 OPTIONS
   -s, --scope GLOB     Glob filter for file narrowing (e.g. "*.py")
   -i, --intent MODE    Override: auto|file|content|symbol|nav (default: auto)
+  -c, --compact        Nav-only compact JSON: relative paths, no next_hint
   -o, --output MODE    pretty|json (default: pretty for tty, json for pipe)
   -p, --path PATH      Search root (default: .). Overrides positional [path].
   --max-candidates N   Override candidate file cap (default: 50)
@@ -67,6 +68,7 @@ EXAMPLES
   fs -s "*.ts" McpServer            # symbol search, scoped to .ts files
   fs -i symbol authenticate         # force symbol intent
   fs -i nav docs                    # explicit path navigation
+  fs -i nav -c docs                 # nav-only compact JSON/result shaping
   fs -o json "*.rs" | jq '.hits'    # JSON output for piping
 EOF
 }

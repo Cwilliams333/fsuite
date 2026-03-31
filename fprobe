@@ -171,9 +171,9 @@ print(w.get('text', ''))
 
 pretty_patch() {
   local json_data="$1"
-  python3 -c "
+  echo "$json_data" | python3 -c "
 import sys, json
-d = json.loads('''$json_data''')
+d = json.load(sys.stdin)
 if 'error' in d and d.get('patched', 0) == 0:
     print(f'fprobe patch: {d[\"error\"]}')
     sys.exit(1)

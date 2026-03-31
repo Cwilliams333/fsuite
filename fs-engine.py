@@ -612,7 +612,10 @@ def orchestrate(request):
         for h in hits:
             ch = {"path": os.path.relpath(h.get("path", ""), base), "kind": h.get("kind", "file")}
             if "preview" in h:
-                ch["preview"] = [{"name": c["name"], "kind": c["kind"]} for c in h["preview"]]
+                ch["preview"] = [
+                    {"name": c.get("name", ""), "kind": c.get("kind", "file")}
+                    for c in h["preview"] if isinstance(c, dict)
+                ]
             compact_hits.append(ch)
         hits = compact_hits
 

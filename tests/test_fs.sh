@@ -373,8 +373,9 @@ result=$("$FS" -o json "authenticate" --intent symbol --path /tmp 2>/dev/null ||
 assert_json_field "CLI --intent symbol" "$result" "resolved_intent" "symbol"
 
 # CLI --help exits 0
-"$FS" --help >/dev/null 2>&1; help_rc=$?
+help_out=$("$FS" --help 2>/dev/null); help_rc=$?
 assert_eq "CLI --help exits 0" "0" "$help_rc"
+assert_eq "CLI --help documents compact nav mode" "true" "$([[ "$help_out" == *"--compact"* ]] && [[ "$help_out" == *"nav"* ]] && echo true || echo false)"
 
 # CLI --version
 version_out=$("$FS" --version 2>/dev/null)
@@ -678,6 +679,18 @@ if [[ "$content_next" == "True" ]]; then
 else
   TESTS_FAILED=$((TESTS_FAILED + 1))
   echo -e "${RED}✗${NC} 8.2 compact should be ignored for content: next_hint present=$content_next"
+fi
+
+# 8.3 — compact is ignored for symbol intent (preserves next_hint and symbol hit shape)
+TESTS_RUN=$((TESTS_RUN + 1))
+symbol_compact=$(echo '{"query":"AuthError","path":"'"$TEST_DIR"'","intent":"symbol","compact":true}' | python3 "$ENGINE" 2>/dev/null)
+symbol_check=$(echo "$symbol_compact" | python3 -c 'import sys,json; d=json.load(sys.stdin); first=d["hits"][0] if d["hits"] else {}; print(d.get("next_hint") is not None and "file" in first and "path" not in first)' 2>/dev/null || echo "FAIL")
+if [[ "$symbol_check" == "True" ]]; then
+  TESTS_PASSED=$((TESTS_PASSED + 1))
+  echo -e "${GREEN}✓${NC} 8.3 compact ignored for symbol (next_hint + file hits preserved)"
+else
+  TESTS_FAILED=$((TESTS_FAILED + 1))
+  echo -e "${RED}✗${NC} 8.3 compact should be ignored for symbol: check=$symbol_check"
 fi
 
 # ============================================================================
