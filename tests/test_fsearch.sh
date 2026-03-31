@@ -889,6 +889,49 @@ test_default_flag_seeding() {
 }
 
 # ============================================================================
+# Regression: node_modules prune must apply in path/both match mode
+# ============================================================================
+
+test_match_both_excludes_node_modules() {
+  # Create a node_modules subtree where "auth" appears in path but should be pruned
+  mkdir -p "${TEST_DIR}/node_modules/auth-lib/src"
+  touch "${TEST_DIR}/node_modules/auth-lib/src/handler.ts"
+  touch "${TEST_DIR}/node_modules/auth-lib/index.js"
+
+  local output
+  output=$("${FSEARCH}" -o json --type both --match both auth "${TEST_DIR}" 2>&1)
+  local nm_hits
+  nm_hits=$(echo "$output" | python3 -c 'import sys,json; d=json.load(sys.stdin); print(sum(1 for r in d.get("results",[]) if "node_modules" in r))')
+
+  if [[ "$nm_hits" == "0" ]]; then
+    pass "match-both excludes node_modules path hits"
+  else
+    fail "match-both excludes node_modules path hits" "found $nm_hits node_modules hits in results"
+  fi
+}
+
+test_match_both_node_modules_perf() {
+  # Simulate a heavy node_modules tree — 2000 files across nested dirs
+  local nm="${TEST_DIR}/node_modules/heavy-dep"
+  mkdir -p "$nm/src" "$nm/lib" "$nm/dist"
+  for i in $(seq 1 500); do
+    touch "$nm/src/file${i}.js" "$nm/lib/file${i}.js" "$nm/dist/file${i}.js" "$nm/file${i}.d.ts"
+  done
+
+  local start_ms end_ms elapsed_ms
+  start_ms=$(date +%s%3N)
+  "${FSEARCH}" --type both --match both --preview 5 heavy "${TEST_DIR}" >/dev/null 2>&1
+  end_ms=$(date +%s%3N)
+  elapsed_ms=$((end_ms - start_ms))
+
+  if (( elapsed_ms < 2000 )); then
+    pass "match-both on large node_modules completes under 2s (${elapsed_ms}ms)"
+  else
+    fail "match-both on large node_modules completes under 2s" "took ${elapsed_ms}ms"
+  fi
+}
+
+# ============================================================================
 # Main Test Runner
 # ============================================================================
 
@@ -988,6 +1031,10 @@ main() {
   # Negative tests
   run_test "Invalid max value" test_invalid_max_value
   run_test "Unknown option" test_unknown_option
+
+  # Regression: node_modules prune in path/both match mode
+  run_test "match-both excludes node_modules path hits" test_match_both_excludes_node_modules
+  run_test "match-both on large node_modules completes under 2s" test_match_both_node_modules_perf
 
   # v1.5.0 features
   run_test "Project-name flag" test_project_name

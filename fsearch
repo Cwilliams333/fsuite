@@ -501,11 +501,26 @@ run_find() {
     both) type_args=( \( -type f -o -type d \) ) ;;
   esac
 
+  # Build prune expressions for default exclude patterns so find skips them
+  # at the filesystem level instead of piping thousands of items through bash.
+  local prune_args=()
+  if (( ${#EXCLUDE_PATTERNS[@]} > 0 )); then
+    for _ep in "${EXCLUDE_PATTERNS[@]}"; do
+      # Convert glob patterns like "*/node_modules" to find -path prune
+      prune_args+=(-path "$_ep" -o)
+    done
+  fi
+
+  local find_cmd=(find "$path")
+  if (( ${#prune_args[@]} > 0 )); then
+    find_cmd+=(\( "${prune_args[@]}" -false \) -prune -o)
+  fi
+
   # 2>/dev/null to avoid permission noise in normal use; agent can rerun with sudo if needed.
   if [[ "$match_mode" == "name" ]]; then
-    find "$path" "${type_args[@]}" -name "$query" 2>/dev/null | normalize_result_paths_stream
+    "${find_cmd[@]}" "${type_args[@]}" -name "$query" -print 2>/dev/null | normalize_result_paths_stream
   else
-    find "$path" "${type_args[@]}" 2>/dev/null \
+    "${find_cmd[@]}" "${type_args[@]}" -print 2>/dev/null \
       | normalize_result_paths_stream \
       | match_paths_stream "$query" "$match_mode"
   fi
