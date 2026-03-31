@@ -80,6 +80,7 @@ OUTPUT=""
 MAX_CANDIDATES=""
 MAX_ENRICH=""
 TIMEOUT=""
+COMPACT=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -92,6 +93,7 @@ while [[ $# -gt 0 ]]; do
     --max-candidates) [[ $# -ge 2 ]] || die "missing value for $1"; MAX_CANDIDATES="$2"; shift 2 ;;
     --max-enrich)     [[ $# -ge 2 ]] || die "missing value for $1"; MAX_ENRICH="$2"; shift 2 ;;
     --timeout)        [[ $# -ge 2 ]] || die "missing value for $1"; TIMEOUT="$2"; shift 2 ;;
+    -c|--compact) COMPACT="1"; shift ;;
     --)           shift; break ;;
     -*)           die "unknown option: $1" ;;
     *)
@@ -160,6 +162,7 @@ intent = sys.argv[4]
 max_candidates = sys.argv[5]
 max_enrich = sys.argv[6]
 timeout = sys.argv[7]
+compact = sys.argv[8]
 
 if scope:
     req['scope'] = scope
@@ -171,9 +174,11 @@ if max_enrich:
     req['max_enrich'] = int(max_enrich)
 if timeout:
     req['timeout'] = int(timeout)
+if compact:
+    req['compact'] = True
 
 print(json.dumps(req))
-" "$QUERY" "$SEARCH_PATH" "$SCOPE" "$INTENT" "$MAX_CANDIDATES" "$MAX_ENRICH" "$TIMEOUT") || die "failed to build JSON request"
+" "$QUERY" "$SEARCH_PATH" "$SCOPE" "$INTENT" "$MAX_CANDIDATES" "$MAX_ENRICH" "$TIMEOUT" "$COMPACT") || die "failed to build JSON request"
 
 # ── Run engine ───────────────────────────────────────────────────
 STDERR_TMP=$(mktemp)

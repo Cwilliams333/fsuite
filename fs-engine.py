@@ -599,8 +599,22 @@ def orchestrate(request):
                 if fmap_result:
                     hits = shape_symbol_hits(hits, fmap_result, query=query)
 
+    # ── Compact mode ──────────────────────────────────────────────────────
+    compact = request.get("compact", False)
+
     # ── next_hint ────────────────────────────────────────────────────────
-    next_hint = generate_next_hint(resolved_intent, hits, query, scope)
+    next_hint = None if compact else generate_next_hint(resolved_intent, hits, query, scope)
+
+    # ── Compact hits: strip per-hit next_hint, shorten paths ─────────────
+    if compact and hits:
+        base = os.path.abspath(path)
+        compact_hits = []
+        for h in hits:
+            ch = {"path": os.path.relpath(h.get("path", ""), base), "kind": h.get("kind", "file")}
+            if "preview" in h:
+                ch["preview"] = [{"name": c["name"], "kind": c["kind"]} for c in h["preview"]]
+            compact_hits.append(ch)
+        hits = compact_hits
 
     # ── Build output ─────────────────────────────────────────────────────
     output = {

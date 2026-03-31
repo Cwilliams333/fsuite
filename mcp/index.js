@@ -1104,16 +1104,19 @@ server.registerTool(
       scope: z.string().optional().describe("Glob filter to narrow file set first, e.g. '*.py'"),
         intent: z.enum(["auto", "file", "content", "symbol", "nav"]).optional()
           .describe("Override auto-classification. Default: auto"),
+        compact: z.boolean().optional()
+          .describe("Compact mode: relative paths, no next_hints, minimal per-hit data. Saves tokens."),
       }),
       // outputSchema removed: 2.1.88 StructuredOutput schema cache bug
   },
-  async ({ query, path, scope, intent }) => {
+  async ({ query, path, scope, intent, compact }) => {
     // fs bypasses cli() — returns both pretty ANSI content AND typed
     // structuredContent so agents get machine-readable output.
     const args = ["-o", "json", query];
     if (path) args.push("--path", path);
     if (scope) args.push("--scope", scope);
     if (intent && intent !== "auto") args.push("--intent", intent);
+    if (compact) args.push("--compact");
     try {
       const { stdout } = await run(resolveTool("fs"), args, EXEC_OPTS);
       try {
