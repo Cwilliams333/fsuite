@@ -734,6 +734,7 @@ splice_line_range() {
         local $/;
         my $replacement_text = <$rf>;
         print {$of} $replacement_text;
+        print {$of} "\n" if length($replacement_text) && substr($replacement_text, -1) ne "\n";
         $inserted = 1;
       }
       next if $line >= $start && $line <= $end;
