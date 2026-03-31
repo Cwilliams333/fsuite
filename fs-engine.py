@@ -207,7 +207,7 @@ def run_fsearch(query, path, timeout=TIMEOUT_SECONDS):
     return paths, False
 
 
-def run_fsearch_json(query, path, timeout=TIMEOUT_SECONDS):
+def run_fsearch_json(query, path, max_results=None, timeout=TIMEOUT_SECONDS):
     """Run fsearch -o json with nav-oriented defaults."""
     args = [
         "-o", "json",
@@ -215,9 +215,10 @@ def run_fsearch_json(query, path, timeout=TIMEOUT_SECONDS):
         "--match", "both",
         "--mode", "auto",
         "--preview", "5",
-        query,
-        path,
     ]
+    if max_results is not None:
+        args.extend(["--max", str(max_results)])
+    args.extend([query, path])
 
     stdout, stderr, rc, timed_out = run_tool("fsearch", args, timeout=timeout)
     if timed_out:
@@ -552,7 +553,7 @@ def orchestrate(request):
 
         if tool_name == "fsearch":
             if resolved_intent == "nav":
-                result, timed_out = run_fsearch_json(query, path, timeout=timeout)
+                result, timed_out = run_fsearch_json(query, path, max_results=max_candidates, timeout=timeout)
                 if timed_out:
                     truncated = True
                     break
