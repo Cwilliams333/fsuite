@@ -1766,9 +1766,23 @@ All fsuite CLI tools share the same three output modes: `pretty` (default, human
   "name_glob": "*token*",
   "path": "/home/user",
   "backend": "fd",
+  "search_type": "file",
+  "match_mode": "name",
   "total_found": 12,
   "shown": 12,
-  "results": ["/home/user/.config/token.json", "..."]
+  "truncated": false,
+  "count_mode": "exact",
+  "has_more": false,
+  "results": ["/home/user/.config/token.json", "..."],
+  "hits": [
+    {
+      "path": "/home/user/.config/token.json",
+      "kind": "file",
+      "matched_on": "name",
+      "next_hint": { "tool": "fread", "args": { "path": "/home/user/.config/token.json" } }
+    }
+  ],
+  "next_hint": null
 }
 ```
 

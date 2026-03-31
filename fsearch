@@ -364,12 +364,17 @@ HEADLESS / AI AGENT USAGE
   This script is designed to be easy for an agent to call in "headless" mode:
     fsearch --output json '*token*' /path
   The agent can parse:
-    - "total_found"
-    - "shown"
-    - "results" (array of file paths)
-    - "backend" used
-    - "pattern" and "name_glob" resolved
-    - "path" searched
+    - "total_found"       — number of matches found (lower bound when truncated)
+    - "shown"             — number of results in the output
+    - "truncated"         — boolean: were results capped at --max?
+    - "count_mode"        — "exact" or "lower_bound" (is total_found exact?)
+    - "has_more"          — boolean: are there more results beyond shown?
+    - "results"           — array of file paths
+    - "hits"              — array of objects with path, kind, matched_on, next_hint
+    - "backend"           — search backend used (find or fd)
+    - "pattern"           — original query
+    - "name_glob"         — resolved glob pattern
+    - "path"              — search root
 
   For simple piping (no JSON parsing), use:
     fsearch --output paths '*.log' /var/log | head

@@ -539,8 +539,9 @@ function renderFsearchStructured(d) {
   if (!d || d.tool !== "fsearch") return null;
 
   const lines = [];
-  const summary = d.shown < d.total_found
-    ? `${d.shown}/${d.total_found} results shown`
+  const countLabel = d.count_mode === "lower_bound" ? `${d.total_found}+` : `${d.total_found}`;
+  const summary = d.has_more
+    ? `${d.shown}/${countLabel} results shown (more available)`
     : `${d.total_found} results found`;
   lines.push(theme.meta(summary));
 
@@ -797,6 +798,9 @@ server.registerTool(
       preview_limit: z.number(),
       total_found: z.number(),
       shown: z.number(),
+      truncated: z.boolean(),
+      count_mode: z.enum(["exact", "lower_bound"]),
+      has_more: z.boolean(),
       results: z.array(z.string()),
       hits: z.array(fsearchHitSchema),
       next_hint: fsearchNextHintSchema.nullable(),
