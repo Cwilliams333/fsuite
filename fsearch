@@ -574,6 +574,29 @@ normalize_result_paths_stream() {
   done
 }
 
+collect_limited_results_stream() {
+  local limit="$1"
+  shift
+  local pipe_status=()
+  local status
+
+  # head intentionally closes early once enough results are collected. Treat
+  # SIGPIPE from upstream producers as expected, but preserve any other real
+  # pipeline error so callers do not get silent empty success responses.
+  set +e
+  "$@" | filter_results_stream | head -n "$limit"
+  pipe_status=("${PIPESTATUS[@]}")
+  set -e
+
+  for status in "${pipe_status[@]}"; do
+    if (( status != 0 && status != 141 )); then
+      return "$status"
+    fi
+  done
+
+  return 0
+}
+
 match_paths_stream() {
   local query="$1"
   local match_mode="$2"
@@ -607,10 +630,24 @@ collect_preview() {
   (( limit > 0 )) || return 0
   [[ -d "$dir_path" ]] || return 0
 
+  local pipe_status=()
+  local status
+
+  set +e
   find "$dir_path" -mindepth 1 -maxdepth 1 2>/dev/null \
     | filter_results_stream \
     | LC_ALL=C sort \
     | head -n "$((limit + 1))"
+  pipe_status=("${PIPESTATUS[@]}")
+  set -e
+
+  for status in "${pipe_status[@]}"; do
+    if (( status != 0 && status != 141 )); then
+      return "$status"
+    fi
+  done
+
+  return 0
 }
 
 path_kind() {
@@ -823,9 +860,9 @@ BACKEND_BIN="$(choose_backend "$BACKEND")"
 # Bound memory: collect only MAX+1 filtered results first, then compute exact
 # filtered total only when truncation is detected.
 if [[ "$BACKEND_BIN" == "find" ]]; then
-  mapfile -t RESULTS < <(run_find "$SEARCH_PATH" "$NAME_GLOB" "$SEARCH_TYPE" "$MATCH_MODE" | filter_results_stream | head -n "$((MAX + 1))" || true)
+  mapfile -t RESULTS < <(collect_limited_results_stream "$((MAX + 1))" run_find "$SEARCH_PATH" "$NAME_GLOB" "$SEARCH_TYPE" "$MATCH_MODE" || true)
 else
-  mapfile -t RESULTS < <(run_fd "$BACKEND_BIN" "$SEARCH_PATH" "$NAME_GLOB" "$SEARCH_TYPE" "$MATCH_MODE" | filter_results_stream | head -n "$((MAX + 1))" || true)
+  mapfile -t RESULTS < <(collect_limited_results_stream "$((MAX + 1))" run_fd "$BACKEND_BIN" "$SEARCH_PATH" "$NAME_GLOB" "$SEARCH_TYPE" "$MATCH_MODE" || true)
 fi
 
 TOTAL_FOUND="${#RESULTS[@]}"

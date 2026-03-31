@@ -73,6 +73,49 @@ fail() {
   fi
 }
 
+github_command_escape() {
+  local value="${1:-}"
+  value="${value//'%'/'%25'}"
+  value="${value//$'\r'/'%0D'}"
+  value="${value//$'\n'/'%0A'}"
+  printf '%s' "$value"
+}
+
+github_report_failure() {
+  local title="$1"
+  local details="$2"
+
+  if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+    printf '::error title=%s::%s\n' \
+      "$(github_command_escape "$title")" \
+      "$(github_command_escape "$details")"
+  fi
+
+  if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    {
+      echo "### $title"
+      echo
+      echo '```text'
+      printf '%s\n' "$details"
+      echo '```'
+      echo
+    } >> "$GITHUB_STEP_SUMMARY"
+  fi
+}
+
+persist_failure_artifacts() {
+  local prefix="$1"
+  local stdout_file="$2"
+  local stderr_file="$3"
+  local artifact_dir="${FSUITE_TEST_ARTIFACT_DIR:-}"
+
+  [[ -n "$artifact_dir" ]] || return 0
+
+  mkdir -p "$artifact_dir"
+  cp "$stdout_file" "$artifact_dir/${prefix}.stdout.txt"
+  cp "$stderr_file" "$artifact_dir/${prefix}.stderr.txt"
+}
+
 run_test() {
   TESTS_RUN=$((TESTS_RUN + 1))
   local test_name="$1"
@@ -944,12 +987,57 @@ test_match_both_no_recount_on_truncation() {
     touch "$matchdir/item_${i}.txt"
   done
 
-  local output total count_mode truncated has_more
-  output=$("${FSEARCH}" -o json --match both --backend find -m 50 item "${matchdir}" 2>&1)
-  total=$(echo "$output" | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d["total_found"])')
-  count_mode=$(echo "$output" | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get("count_mode","MISSING"))')
-  truncated=$(echo "$output" | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get("truncated","MISSING"))')
-  has_more=$(echo "$output" | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get("has_more","MISSING"))')
+  local output_file error_file parse_file
+  local total count_mode truncated has_more
+  local rc=0 parse_rc=0
+  output_file=$(mktemp)
+  error_file=$(mktemp)
+  parse_file=$(mktemp)
+
+  "${FSEARCH}" -o json --match both --backend find -m 50 item "${matchdir}" >"${output_file}" 2>"${error_file}" || rc=$?
+  if [[ $rc -ne 0 ]] || [[ ! -s "${output_file}" ]]; then
+    local stderr stdout_preview json_bytes details
+    stderr=$(tr '\n' ' ' < "${error_file}" 2>/dev/null || true)
+    stdout_preview=$(head -c 200 "${output_file}" 2>/dev/null || true)
+    json_bytes=$(wc -c < "${output_file}" 2>/dev/null || echo 0)
+    persist_failure_artifacts "fsearch-truncation" "${output_file}" "${error_file}"
+    details="fsearch rc=${rc}, json_bytes=${json_bytes}, stderr=${stderr:-<empty>}, stdout_preview=${stdout_preview:-<empty>}"
+    github_report_failure "Truncated search contract" "$details"
+    rm -f "${output_file}" "${error_file}" "${parse_file}"
+    fail "Truncated search contract" "$details"
+    return
+  fi
+
+  python3 - "${output_file}" >"${parse_file}" <<'PY' || parse_rc=$?
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as fh:
+    data = json.load(fh)
+
+print(data["total_found"])
+print(data.get("count_mode", "MISSING"))
+print(data.get("truncated", "MISSING"))
+print(data.get("has_more", "MISSING"))
+PY
+
+  if [[ $parse_rc -ne 0 ]]; then
+    local stderr stdout_preview details
+    stderr=$(tr '\n' ' ' < "${error_file}" 2>/dev/null || true)
+    stdout_preview=$(head -c 200 "${output_file}" 2>/dev/null || true)
+    persist_failure_artifacts "fsearch-truncation" "${output_file}" "${error_file}"
+    details="json parse failed rc=${parse_rc}, stderr=${stderr:-<empty>}, stdout_preview=${stdout_preview:-<empty>}"
+    github_report_failure "Truncated search contract" "$details"
+    rm -f "${output_file}" "${error_file}" "${parse_file}"
+    fail "Truncated search contract" "$details"
+    return
+  fi
+
+  total=$(sed -n '1p' "${parse_file}")
+  count_mode=$(sed -n '2p' "${parse_file}")
+  truncated=$(sed -n '3p' "${parse_file}")
+  has_more=$(sed -n '4p' "${parse_file}")
+  rm -f "${output_file}" "${error_file}" "${parse_file}"
 
   local ok=1
   (( total == 51 )) || ok=0
