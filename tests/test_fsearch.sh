@@ -945,7 +945,7 @@ test_match_both_no_recount_on_truncation() {
   done
 
   local output total count_mode truncated has_more
-  output=$("${FSEARCH}" -o json --match both -m 50 item "${matchdir}" 2>&1)
+  output=$("${FSEARCH}" -o json --match both --backend find -m 50 item "${matchdir}" 2>&1)
   total=$(echo "$output" | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d["total_found"])')
   count_mode=$(echo "$output" | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get("count_mode","MISSING"))')
   truncated=$(echo "$output" | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get("truncated","MISSING"))')
