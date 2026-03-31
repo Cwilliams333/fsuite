@@ -655,9 +655,7 @@ async function cli(tool, args, renderAs) {
     if (renderer) {
       const pretty = renderer(raw);
       if (pretty) {
-        const result = { content: [{ type: "text", text: pretty }] };
-        if (parsed !== undefined) result.structuredContent = parsed;
-        return result;
+        return { content: [{ type: "text", text: pretty }] };
       }
     }
 
@@ -808,7 +806,6 @@ server.registerTool(
         }
         return {
           content: [{ type: "text", text: rendered }],
-          structuredContent: parsed,
         };
       } catch (renderErr) {
         console.error("fsearch render error:", renderErr);
@@ -1173,7 +1170,6 @@ const parsed = JSON.parse(stdout);
 
       return {
         content: [{ type: "text", text: lines.join("\n") }],
-        structuredContent: parsed,
       };
       } catch (renderErr) {
         console.error("fs render error:", renderErr);
