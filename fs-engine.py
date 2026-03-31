@@ -480,7 +480,7 @@ def generate_next_hint(intent, hits, query, scope=None):
 
     elif intent == "nav":
         if top_hit.get("kind") == "dir":
-            return {"tool": "ftree", "args": {"path": top_file, "depth": 2}}
+            return {"tool": "fls", "args": {"path": top_file, "mode": "tree"}}
         return {"tool": "fread", "args": {"path": top_file}}
 
     elif intent == "content":

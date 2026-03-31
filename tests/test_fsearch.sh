@@ -776,8 +776,9 @@ next_hint = data.get("next_hint") or {}
 ok = (
     hit.get("kind") == "dir"
     and hit.get("path", "").endswith("docs-\x01control")
-    and next_hint.get("tool") == "ftree"
+    and next_hint.get("tool") == "fls"
     and (next_hint.get("args") or {}).get("path") == hit.get("path")
+    and (next_hint.get("args") or {}).get("mode") == "tree"
 )
 print("yes" if ok else "no")
 ' 2>/dev/null || echo "no")

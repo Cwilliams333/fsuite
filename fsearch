@@ -629,7 +629,7 @@ render_next_hint_json() {
 
   escaped_path="$(printf "%s" "$path" | json_escape)"
   if [[ "$kind" == "dir" ]]; then
-    printf '{"tool":"ftree","args":{"path":"%s","depth":2}}' "$escaped_path"
+    printf '{"tool":"fls","args":{"path":"%s","mode":"tree"}}' "$escaped_path"
   else
     printf '{"tool":"fread","args":{"path":"%s"}}' "$escaped_path"
   fi

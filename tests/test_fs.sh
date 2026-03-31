@@ -413,10 +413,10 @@ json.dump({
         "time_ms": 1,
     },
     "next_hint": {
-        "tool": "ftree",
+        "tool": "fls",
         "args": {
             "path": "/tmp/docs",
-            "depth": 2,
+            "mode": "tree",
         }
     },
 }, sys.stdout)
@@ -592,10 +592,12 @@ result=$("$FS" -o json "docs" "$TEST_DIR" 2>/dev/null || true)
 assert_json_field "7.8 bare docs remains content" "$result" "resolved_intent" "content"
 assert_json_field "7.8 bare docs remains low confidence" "$result" "route_confidence" "low"
 
-# 7.9 — nav dir hits recommend ftree
+# 7.9 — nav dir hits recommend fls tree mode
 result=$("$FS" -o json "docs" "$TEST_DIR" --intent nav 2>/dev/null || true)
 next_tool=$(echo "$result" | python3 -c "import sys,json; print((json.load(sys.stdin).get('next_hint') or {}).get('tool', ''))" 2>/dev/null || echo "")
-assert_eq "7.9 nav dir hit suggests ftree" "ftree" "$next_tool"
+next_mode=$(echo "$result" | python3 -c "import sys,json; print(((json.load(sys.stdin).get('next_hint') or {}).get('args') or {}).get('mode', ''))" 2>/dev/null || echo "")
+assert_eq "7.9 nav dir hit suggests fls" "fls" "$next_tool"
+assert_eq "7.9 nav dir hit suggests tree mode" "tree" "$next_mode"
 
 # 7.10 — malformed nav JSON from fsearch surfaces as an error
 result=$(run_engine_with_stubbed_fsearch '{"query":"docs","path":"/tmp","intent":"nav"}' '{not json')
