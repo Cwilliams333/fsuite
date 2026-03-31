@@ -653,6 +653,33 @@ else
   echo "  actual error: ${engine_error}"
 fi
 
+
+# 8 — compact mode
+# 8.1 — compact nav produces relative paths and no next_hint
+TESTS_RUN=$((TESTS_RUN + 1))
+compact_result=$(echo '{"query":"test","path":"'"$TEST_DIR"'","intent":"nav","compact":true}' | python3 "$ENGINE" 2>/dev/null)
+compact_next=$(echo "$compact_result" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("next_hint"))' 2>/dev/null || echo "FAIL")
+compact_first_path=$(echo "$compact_result" | python3 -c 'import sys,json; h=json.load(sys.stdin)["hits"]; print(h[0]["path"] if h else "EMPTY")' 2>/dev/null || echo "FAIL")
+if [[ "$compact_next" == "None" ]] && [[ "$compact_first_path" != /* ]]; then
+  TESTS_PASSED=$((TESTS_PASSED + 1))
+  echo -e "${GREEN}✓${NC} 8.1 compact nav: no next_hint, relative paths"
+else
+  TESTS_FAILED=$((TESTS_FAILED + 1))
+  echo -e "${RED}✗${NC} 8.1 compact nav: next_hint=$compact_next, first_path=$compact_first_path"
+fi
+
+# 8.2 — compact is ignored for content intent (preserves next_hint)
+TESTS_RUN=$((TESTS_RUN + 1))
+content_compact=$(echo '{"query":"authenticate","path":"'"$TEST_DIR"'","intent":"content","compact":true}' | python3 "$ENGINE" 2>/dev/null)
+content_next=$(echo "$content_compact" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("next_hint") is not None)' 2>/dev/null || echo "FAIL")
+if [[ "$content_next" == "True" ]]; then
+  TESTS_PASSED=$((TESTS_PASSED + 1))
+  echo -e "${GREEN}✓${NC} 8.2 compact ignored for content (next_hint preserved)"
+else
+  TESTS_FAILED=$((TESTS_FAILED + 1))
+  echo -e "${RED}✗${NC} 8.2 compact should be ignored for content: next_hint present=$content_next"
+fi
+
 # ============================================================================
 # Results
 # ============================================================================

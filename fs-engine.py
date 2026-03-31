@@ -599,13 +599,13 @@ def orchestrate(request):
                 if fmap_result:
                     hits = shape_symbol_hits(hits, fmap_result, query=query)
 
-    # ── Compact mode ──────────────────────────────────────────────────────
-    compact = request.get("compact", False)
+    # ── Compact mode (nav only) ────────────────────────────────────────
+    compact = request.get("compact", False) and resolved_intent == "nav"
 
     # ── next_hint ────────────────────────────────────────────────────────
     next_hint = None if compact else generate_next_hint(resolved_intent, hits, query, scope)
 
-    # ── Compact hits: strip per-hit next_hint, shorten paths ─────────────
+    # ── Compact nav hits: relative paths, no per-hit next_hint ───────────
     if compact and hits:
         base = os.path.abspath(path)
         compact_hits = []
