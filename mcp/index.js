@@ -615,6 +615,155 @@ const fsearchHitSchema = z.object({
   next_hint: fsearchNextHintSchema.nullable().optional(),
 }).passthrough();
 
+// ─── fcase pretty renderer ────────────────────────────────────────
+function renderFcaseResult(jsonStr) {
+  try {
+    const d = JSON.parse(jsonStr);
+    // Only render case views — skip export (has .events) which needs raw JSON
+    if (!d.cases && !d.case) return null;
+    if (d.events) return null;
+
+    // Single case view (status, note, init, resolve, etc.)
+    if (d.case) {
+      const c = d.case;
+      const icon = c.status === "resolved" ? `${fg(80,200,80)}\u2713${RESET}`
+                 : c.status === "archived" ? `${DIM}\u25CB${RESET}`
+                 : c.status === "deleted"  ? `${fg(255,80,80)}\u2717${RESET}`
+                 : `${fg(255,200,50)}\u25CF${RESET}`;
+      const pri = c.priority === "critical" ? ` ${fg(255,80,80)}crit${RESET}`
+                : c.priority === "high"     ? ` ${fg(255,80,80)}high${RESET}`
+                : "";
+      let out = `${icon} ${BOLD}#${c.id}${RESET} ${c.slug}${pri}\n`;
+      if (c.goal) out += `${DIM}  ${c.goal}${UNDIM}\n`;
+      if (c.resolution_summary) out += `${fg(80,200,80)}  ${c.resolution_summary}${RESET}\n`;
+      if (c.next_move) out += `${fg(255,200,50)}  next: ${c.next_move}${RESET}\n`;
+      // Pass through any message from the action
+      if (d.message) out += `${DIM}${d.message}${UNDIM}\n`;
+      return out;
+    }
+
+    // Case list view
+    const cases = d.cases || [];
+    const resolved = cases.filter(c => c.status === "resolved");
+    const open = cases.filter(c => c.status === "open");
+    const archived = cases.filter(c => c.status === "archived");
+
+    // Priority sort: critical > high > medium > low > normal
+    const priOrder = { critical: 0, high: 1, medium: 2, low: 3, normal: 4 };
+    const sortByPri = (a, b) => (priOrder[a.priority] ?? 4) - (priOrder[b.priority] ?? 4);
+
+    // Summary bar
+    const parts = [`${cases.length} cases`];
+    if (resolved.length) parts.push(`${resolved.length} resolved`);
+    if (open.length) parts.push(`${open.length} open`);
+    if (archived.length) parts.push(`${archived.length} archived`);
+    let out = theme.meta(parts.join(" | ")) + "\n";
+
+    const renderCase = (c) => {
+      const icon = c.status === "resolved" ? `${fg(80,200,80)}\u2713${RESET}`
+                 : c.status === "archived" ? `${DIM}\u25CB${RESET}`
+                 : `${fg(255,200,50)}\u25CF${RESET}`;
+      const pri = c.priority === "critical" ? `${fg(255,80,80)}crit${RESET}   `
+                : c.priority === "high"     ? `${fg(255,80,80)}high${RESET}   `
+                : "       ";
+      const slug = c.slug.length > 24 ? c.slug.slice(0, 24) : c.slug.padEnd(24);
+      const goal = c.resolution_summary || c.goal || "";
+      const goalTrim = goal.length > 50 ? goal.slice(0, 47) + "..." : goal;
+      return `  ${icon} ${BOLD}#${String(c.id).padStart(2)}${RESET} ${slug} ${pri}${DIM}\u2014 ${goalTrim}${UNDIM}`;
+    };
+
+    const MAX_PER_GROUP = 6;
+
+    if (resolved.length) {
+      resolved.sort(sortByPri);
+      out += `${fg(80,200,80)}${BOLD} RESOLVED (${resolved.length})${RESET}\n`;
+      resolved.slice(0, MAX_PER_GROUP).forEach(c => { out += renderCase(c) + "\n"; });
+      if (resolved.length > MAX_PER_GROUP) out += `${DIM}  ... +${resolved.length - MAX_PER_GROUP} more${UNDIM}\n`;
+    }
+    if (open.length) {
+      open.sort(sortByPri);
+      out += `${fg(255,200,50)}${BOLD} OPEN (${open.length})${RESET}\n`;
+      open.slice(0, MAX_PER_GROUP).forEach(c => { out += renderCase(c) + "\n"; });
+      if (open.length > MAX_PER_GROUP) out += `${DIM}  ... +${open.length - MAX_PER_GROUP} more (ctrl+o to expand)${UNDIM}\n`;
+    }
+    if (archived.length) {
+      out += `${DIM}${BOLD} ARCHIVED (${archived.length})${RESET}\n`;
+      archived.slice(0, 3).forEach(c => { out += renderCase(c) + "\n"; });
+      if (archived.length > 3) out += `${DIM}  ... +${archived.length - 3} more${UNDIM}\n`;
+    }
+
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+// ─── fprobe pretty renderer ──────────────────────────────────────
+function renderFprobeResult(jsonStr, ctx = {}) {
+  try {
+    const d = JSON.parse(jsonStr);
+    // Handle array results from strings and scan modes.
+    const items = Array.isArray(d) ? d : d.items || d.matches || d.results;
+    if (items && Array.isArray(items)) {
+      const firstItem = items[0];
+      const isScanResult = ctx.action === "scan" || (!!firstItem &&
+        typeof firstItem === "object" &&
+        (firstItem.match_length !== undefined ||
+          firstItem.context_start !== undefined ||
+          firstItem.context_end !== undefined));
+      const mode = isScanResult ? "scan" : "strings";
+      let out = theme.meta(`fprobe ${mode} | ${items.length} matches`) + "\n";
+      const filter = (d && typeof d === "object" && !Array.isArray(d)) ? d.filter : undefined;
+      items.forEach(item => {
+        const offset = item.offset !== undefined ? item.offset : item.start;
+        const hex = offset !== undefined ? `0x${offset.toString(16).padStart(4, "0")}` : "    ";
+        let text = item.text || item.content || item.value || "";
+        if (text.length > 80) text = "..." + text.slice(-77);
+        // Highlight filter term if present
+        if (filter && text.includes(filter)) {
+          text = text.replace(new RegExp(filter.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"),
+            `${fg(255,200,50)}${BOLD}${filter}${RESET}`);
+        }
+        out += `${fg(190,132,255)}${hex}${RESET} \u2502 ${text}\n`;
+      });
+      return out;
+    }
+
+    // Scan mode results
+    if (d.matches !== undefined && typeof d.matches === "number") {
+      let out = theme.meta(`fprobe scan | ${d.matches} matches`) + "\n";
+      if (d.offsets && Array.isArray(d.offsets)) {
+        d.offsets.forEach(o => {
+          const hex = `0x${o.toString(16).padStart(8, "0")}`;
+          out += `${fg(190,132,255)}${hex}${RESET}\n`;
+        });
+      }
+      if (d.context_preview) out += `${DIM}${d.context_preview}${UNDIM}\n`;
+      return out;
+    }
+
+    // Patch mode result
+    if (d.patched !== undefined || d.dry_run !== undefined) {
+      const patchedCount = Number.isInteger(d.patched) ? d.patched : 0;
+      const noun = patchedCount === 1 ? "replacement" : "replacements";
+      const status = d.dry_run ? `${fg(255,200,50)}Dry run${RESET}` : patchedCount > 0 ? `${fg(80,200,80)}Patched${RESET}` : `${fg(255,80,80)}Failed${RESET}`;
+      let out = `${status} ${patchedCount} ${noun}`;
+      if (d.file) out += ` in ${d.file}`;
+      out += "\n";
+      return out;
+    }
+
+    // Window mode — just show the hex/printable dump
+    if (d.window || d.hex || d.printable) {
+      return null; // fall through to raw JSON for window dumps
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 // Tool → renderer mapping
 const RENDERERS = {
   fedit: renderFeditResult,
@@ -625,6 +774,8 @@ const RENDERERS = {
   ftree: renderFtreeResult,
   fls: renderFtreeResult,
   fsearch: renderFsearchResult,
+  fcase: renderFcaseResult,
+  fprobe: renderFprobeResult,
 };
 
 function maybeParseJson(raw) {
@@ -643,21 +794,82 @@ function normalizeStructuredContent(parsed) {
   return parsed;
 }
 
+// ─── Helper: strip redundant/telemetry fields from structured JSON ──
+// Runs AFTER normalizeStructuredContent, BEFORE return in cli().
+// Goal: reduce token waste — agents don't need internal telemetry or
+// duplicate representations (lines[] vs tree_json, size_human vs size_bytes).
+function slimStructuredContent(obj) {
+  if (obj === undefined || obj === null) return obj;
+
+  // Top-level keys to remove entirely
+  const TOP_STRIP = new Set([
+    "tool", "version", "mode", "backend",
+    "budget_seconds", "budget_used_seconds", "budget_budget",
+    "recon_depth", "ignored",
+  ]);
+
+  // Keys to remove from nested objects only (keep top-level duration_ms)
+  const NESTED_STRIP = new Set([
+    "version",
+    "budget_seconds", "budget_used_seconds", "budget_budget",
+    "recon_depth", "ignored",
+    "size_human",
+  ]);
+
+  function slim(node, depth) {
+    if (node === null || node === undefined) return node;
+    if (depth >= 20) return node;
+    if (Array.isArray(node)) return node.map(item => slim(item, depth));
+    if (typeof node !== "object") return node;
+
+    const strip = depth === 0 ? TOP_STRIP : NESTED_STRIP;
+    const out = {};
+    for (const [k, v] of Object.entries(node)) {
+      if (strip.has(k)) continue;
+      // Drop lines[] from tree output — tree_json has the data
+      if (k === "lines" && node.tree_json) continue;
+      out[k] = slim(v, depth + 1);
+    }
+
+    // Flatten single-key nesting: { snapshot: { recon: X, tree: Y } } stays,
+    // but { result: { ...data } } flattens when only one key remains.
+    const keys = Object.keys(out);
+    if (keys.length === 1) {
+      const only = out[keys[0]];
+      // Flatten { wrapper: <object> } but not { wrapper: <primitive/array> }
+      // Exception: keep "items" wrapper for arrays (normalizeStructuredContent made it)
+      if (typeof only === "object" && only !== null && !Array.isArray(only) && keys[0] !== "items") {
+        return only;
+      }
+    }
+    return out;
+  }
+
+  return slim(obj, 0);
+}
+
+
 // ─── Helper: run CLI tool, pretty-render if possible ─────────────
-async function cli(tool, args, renderAs) {
+async function cli(tool, args, renderAs, renderContext) {
   try {
     const { stdout, stderr } = await run(resolveTool(tool), args, EXEC_OPTS);
     const raw = stdout || stderr || "(no output)";
-    const parsed = normalizeStructuredContent(maybeParseJson(raw));
+    const parsed = slimStructuredContent(normalizeStructuredContent(maybeParseJson(raw)));
 
-    // Try pretty rendering first so humans still get a readable summary.
-    const renderer = RENDERERS[renderAs || tool];
-    if (renderer) {
-      const pretty = renderer(raw);
-      if (pretty) {
-        return { content: [{ type: "text", text: pretty }] };
+        // Pretty ANSI for user display. structuredContent intentionally omitted —
+        // Claude Code's "early return blender" discards content[text] when
+        // structuredContent exists, so rendered tools must return content[text] only.
+      const renderer = RENDERERS[renderAs || tool];
+      if (renderer) {
+        const pretty = renderer(raw, renderContext);
+        if (pretty) {
+            // When renderer produces pretty ANSI, return content[text] only.
+            // Claude Code's "early return blender" discards content[text]
+            // when structuredContent exists — so we must omit it here.
+            const result = { content: [{ type: "text", text: pretty }] };
+            return result;
+        }
       }
-    }
 
     const result = { content: [{ type: "text", text: raw }] };
     if (parsed !== undefined) result.structuredContent = parsed;
@@ -668,7 +880,7 @@ async function cli(tool, args, renderAs) {
 }
 
 // ─── Server ──────────────────────────────────────────────────────
-const server = new McpServer({ name: "fsuite", version: "2.3.0" });
+const server = new McpServer({ name: "fsuite", version: "3.1.0" });
 
 // ─── ftree ───────────────────────────────────────────────────────
 server.registerTool(
@@ -1034,10 +1246,40 @@ server.registerTool(
   );
 
   // ─── fprobe ─────────────────────────────────────────────────────
-  server.registerTool(
-    "fprobe",
-    {
-      title: coloredTitle("fprobe"),
+
+  // Decode byte escapes into a Buffer and pass them to the engine via hidden
+  // hex argv flags so raw bytes survive the JS -> argv boundary unchanged.
+  function decodeFprobeParam(name, s) {
+    if (s === undefined || s === null) return undefined;
+    const parts = [];
+    let lastIndex = 0;
+    const escapePattern = /\\x([0-9a-fA-F]{2})|\\u([0-9a-fA-F]{4})/g;
+    let match;
+
+    while ((match = escapePattern.exec(s)) !== null) {
+      if (match.index > lastIndex) {
+        parts.push(Buffer.from(s.slice(lastIndex, match.index), "utf8"));
+      }
+
+      if (match[1]) {
+        parts.push(Buffer.from([parseInt(match[1], 16)]));
+      } else {
+        const value = parseInt(match[2], 16);
+        if (value > 0xff) {
+          throw new Error(`${name} contains \\u${match[2]} which exceeds one raw byte; use \\xNN for byte values`);
+        }
+        parts.push(Buffer.from([value]));
+      }
+
+      lastIndex = escapePattern.lastIndex;
+    }
+
+    if (lastIndex < s.length) {
+      parts.push(Buffer.from(s.slice(lastIndex), "utf8"));
+    }
+    return Buffer.concat(parts);
+  }
+  server.registerTool("fprobe", {
       description:
         "Binary reconnaissance and surgical patching. Scan for patterns, read byte windows, " +
         "extract strings, and patch binaries with same-length replacements. Works on compiled " +
@@ -1046,19 +1288,20 @@ server.registerTool(
         action: z.enum(["strings", "scan", "window", "patch"]).describe("Subcommand"),
         file: z.string().describe("File to probe or patch"),
         filter: z.string().optional().describe("Filter strings to those containing this literal (strings mode)"),
-        pattern: z.string().optional().describe("Literal pattern to find (scan mode)"),
+        pattern: z.string().optional().describe("Pattern to find (scan mode). Literal by default; set decode_escapes for \\xNN/\\uNNNN"),
         context: z.number().optional().describe("Bytes of context around match (scan mode, default 300)"),
         offset: z.number().optional().describe("Byte offset to read from (window mode)"),
         before: z.number().optional().describe("Bytes before offset (window mode, default 0)"),
         after: z.number().optional().describe("Bytes after offset (window mode, default 200)"),
         decode: z.enum(["printable", "utf8", "hex"]).optional().describe("Decode mode (window mode, default printable)"),
         ignore_case: z.boolean().optional().describe("Case-insensitive matching"),
-        target: z.string().optional().describe("Literal text to find and replace (patch mode)"),
-        replacement: z.string().optional().describe("Replacement text, padded with spaces if shorter (patch mode)"),
+        target: z.string().optional().describe("Text to find and replace (patch mode). Literal by default; set decode_escapes for \\xNN/\\uNNNN"),
+        replacement: z.string().optional().describe("Replacement text, padded with spaces if shorter (patch mode). Literal by default; set decode_escapes for \\xNN/\\uNNNN"),
         dry_run: z.boolean().optional().describe("Preview patch without writing (patch mode)"),
+        decode_escapes: z.boolean().optional().describe("Decode \\\\xNN and \\\\uNNNN escape sequences in pattern/target/replacement to raw bytes. Default false (literal)"),
       }),
     },
-    async ({ action, file, filter, pattern, context, offset, before, after, decode, ignore_case, target, replacement, dry_run }) => {
+    async ({ action, file, filter, pattern, context, offset, before, after, decode, ignore_case, target, replacement, dry_run, decode_escapes }) => {
       if (action === "scan" && !pattern) {
         return { content: [{ type: "text", text: "fprobe scan requires pattern" }], isError: true };
       }
@@ -1067,21 +1310,42 @@ server.registerTool(
       }
       if (action === "patch" && (!target || !replacement)) {
         return { content: [{ type: "text", text: "fprobe patch requires --target and --replacement" }], isError: true };
+}
+    const args = [action, file];
+    if (action === "strings" && filter) args.push("--filter", filter);
+    if (action === "scan" && pattern) {
+      if (decode_escapes) {
+        const buf = decodeFprobeParam("pattern", pattern);
+        if (buf) args.push("--pattern-hex", buf.toString("hex"));
+      } else {
+        args.push("--pattern", pattern);
       }
-      const args = [action, file];
-      if (action === "strings" && filter) args.push("--filter", filter);
-      if (action === "scan" && pattern) args.push("--pattern", pattern);
-      if (context) args.push("--context", String(context));
-      if (offset !== undefined) args.push("--offset", String(offset));
-      if (before !== undefined) args.push("--before", String(before));
-      if (after !== undefined) args.push("--after", String(after));
-      if (decode) args.push("--decode", decode);
-      if (ignore_case) args.push("--ignore-case");
-      if (action === "patch" && target) args.push("--target", target);
-      if (action === "patch" && replacement) args.push("--replacement", replacement);
-      if (action === "patch" && dry_run) args.push("--dry-run");
+    }
+    if (context !== undefined) args.push("--context", String(context));
+    if (offset !== undefined) args.push("--offset", String(offset));
+    if (before !== undefined) args.push("--before", String(before));
+    if (after !== undefined) args.push("--after", String(after));
+    if (decode) args.push("--decode", decode);
+    if (ignore_case) args.push("--ignore-case");
+    if (action === "patch" && target) {
+      if (decode_escapes) {
+        const buf = decodeFprobeParam("target", target);
+        if (buf) args.push("--target-hex", buf.toString("hex"));
+      } else {
+        args.push("--target", target);
+      }
+    }
+    if (action === "patch" && replacement) {
+      if (decode_escapes) {
+        const buf = decodeFprobeParam("replacement", replacement);
+        if (buf) args.push("--replacement-hex", buf.toString("hex"));
+      } else {
+        args.push("--replacement", replacement);
+      }
+    }
+    if (action === "patch" && dry_run) args.push("--dry-run");
       args.push("-o", "json");
-      return cli("fprobe", args);
+      return cli("fprobe", args, undefined, { action });
     }
   );
 
