@@ -304,7 +304,7 @@ function colorizeDiff(diff, filePath) {
 function renderFeditResult(jsonStr) {
   try {
     const d = JSON.parse(jsonStr);
-    if (!d.tool || d.tool !== "fedit") return null;
+    if (!d.tool || (d.tool !== "fedit" && d.tool !== "fwrite")) return null;
 
     const mode = d.mode === "create" ? "create" : d.mode === "replace_file" ? "replace" : "patch";
 
@@ -558,7 +558,7 @@ function boldMatchInAnsi(ansiStr, query) {
 function renderFtreeResult(jsonStr) {
   try {
     const d = JSON.parse(jsonStr);
-    if (!d.tool || d.tool !== "ftree") return null;
+    if (!d.tool || (d.tool !== "ftree" && d.tool !== "fls")) return null;
 
     const recon = d.snapshot?.recon;
     const path = recon?.path || "";
